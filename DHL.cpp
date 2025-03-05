@@ -4,9 +4,8 @@
 
 #include "DHL.h"
 
-DHL::DHL(Graph &g, int accInput) : TDGTree(g, accInput)
+DHL::DHL(Graph &g) : TDGTree(g)
 {
-    acc = accInput;
 }
 
 void DHL::BuildDHLIndex()
@@ -107,14 +106,14 @@ void DHL::TDIFGenThread(vector<int> &leafNodes, int begin, int end)
                                 LPFunction lpf2 = graph.vEdge[vToW2.second].lpf;
                                 if (lpfMin.vX.size() < 2)
                                 {
-                                    lpfMin = lpf1.LPFCatSupport(lpf2, graph.lBound, graph.uBound, acc);
+                                    lpfMin = lpf1.LPFCatSupport(lpf2, graph.lBound, graph.uBound);
                                 } else
                                 {
-                                    LPFunction lpfTmp = lpf1.LPFCatSupport(lpf2, graph.lBound, graph.uBound, acc);
+                                    LPFunction lpfTmp = lpf1.LPFCatSupport(lpf2, graph.lBound, graph.uBound);
                                     if (lpfMin.vX.size() > 1 and lpf1.minY + lpf2.minY <= lpfMin.minY and
-                                        !lpfMin.dominate(lpfTmp, acc))
+                                        !lpfMin.dominate(lpfTmp))
                                     {
-                                        lpfMin = lpfMin.LPFMinSupForDec(lpfTmp, acc);
+                                        lpfMin = lpfMin.LPFMinSupForDec(lpfTmp);
                                     }
                                 }
                             }
@@ -304,7 +303,7 @@ LPFunction DHL::disBetweenBorders(int id1, int id2)
                     {
                         LPFunction lpf2 = p.second.first, lpf3 = p2.second.first;
                         if (lpf2.ID2 == lpf3.ID1)
-                            lpfTmp = lpf2.LPFCatSupport(lpf3, graph.lBound, graph.uBound, acc);
+                            lpfTmp = lpf2.LPFCatSupport(lpf3, graph.lBound, graph.uBound);
                     }
                 }
             }
@@ -312,9 +311,9 @@ LPFunction DHL::disBetweenBorders(int id1, int id2)
             if (lpf.vX.size() < 2)
             {
                 lpf = lpfTmp;
-            } else if (lpfTmp.minY < lpf.maxY and !lpf.dominate(lpfTmp, acc))
+            } else if (lpfTmp.minY < lpf.maxY and !lpf.dominate(lpfTmp))
             {
-                lpf = lpf.LPFMinSupForDec(lpfTmp, acc);
+                lpf = lpf.LPFMinSupForDec(lpfTmp);
             }
         }
     } else if (id2 < borderGraph.rank.size() and borderGraph.rank[id2] >= 0)
@@ -335,7 +334,7 @@ LPFunction DHL::disBetweenBorders(int id1, int id2)
                     {
                         LPFunction lpf2 = p.second.first, lpf3 = p2.second.first;
                         if (lpf2.ID2 == lpf3.ID1)
-                            lpfTmp = lpf2.LPFCatSupport(lpf3, graph.lBound, graph.uBound, acc);
+                            lpfTmp = lpf2.LPFCatSupport(lpf3, graph.lBound, graph.uBound);
                     }
                 }
             }
@@ -343,9 +342,9 @@ LPFunction DHL::disBetweenBorders(int id1, int id2)
             if (lpf.vX.size() < 2)
             {
                 lpf = lpfTmp;
-            } else if (lpfTmp.minY < lpf.maxY and !lpf.dominate(lpfTmp, acc))
+            } else if (lpfTmp.minY < lpf.maxY and !lpf.dominate(lpfTmp))
             {
-                lpf = lpf.LPFMinSupForDec(lpfTmp, acc);
+                lpf = lpf.LPFMinSupForDec(lpfTmp);
             }
         }
     }
@@ -376,14 +375,14 @@ LPFunction DHL::DHLQuery(int u, int v)
 
                 if (lpf.vX.size() <= 1)
                 {
-                    LPFunction tmp = sb1.LPFCatSupport(b1b2, graph.lBound, graph.uBound, acc);
-                    lpf = tmp.LPFCatSupport(b2t, graph.lBound, graph.uBound, acc);
+                    LPFunction tmp = sb1.LPFCatSupport(b1b2, graph.lBound, graph.uBound);
+                    lpf = tmp.LPFCatSupport(b2t, graph.lBound, graph.uBound);
                 } else if (sb1.minY + b1b2.minY + b2t.minY < lpf.maxY)
                 {
-                    LPFunction tmp = sb1.LPFCatSupport(b1b2, graph.lBound, graph.uBound, acc);
-                    tmp = tmp.LPFCatSupport(b2t, graph.lBound, graph.uBound, acc);
-                    if (!lpf.dominate(tmp, acc) and lpf.ID1 == tmp.ID1 and lpf.ID2 == tmp.ID2)
-                        lpf = lpf.LPFMinSupForDec(tmp, acc);
+                    LPFunction tmp = sb1.LPFCatSupport(b1b2, graph.lBound, graph.uBound);
+                    tmp = tmp.LPFCatSupport(b2t, graph.lBound, graph.uBound);
+                    if (!lpf.dominate(tmp) and lpf.ID1 == tmp.ID1 and lpf.ID2 == tmp.ID2)
+                        lpf = lpf.LPFMinSupForDec(tmp);
                 }
             }
         }
@@ -417,7 +416,7 @@ int DHL::DHLQuery(int u, int v, int t)
     return cost;
 }
 
-void DHL::updateBorderLabel(vector<pair<int, int>> &wBatch)
+void DHL::updateBorderLabel(vector<pair<int, int>> &wBatch, int upd)
 {
     borderGraph.E.clear();
     borderGraph.ER.clear();
@@ -429,7 +428,7 @@ void DHL::updateBorderLabel(vector<pair<int, int>> &wBatch)
         borderGraph.Tree[i].vertOut.clear();
     }
     borderGraph.CHConstruction();
-    Update(wBatch);
+    Update(wBatch, upd);
     TDIFGen();
 }
 

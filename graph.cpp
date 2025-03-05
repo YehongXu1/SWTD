@@ -232,7 +232,7 @@ int Graph::readBeijingMapDirectedNew(string filenameGraph, string filenameMap)
     return 0;
 }
 
-int Graph::readBeijingTD(string filenameRoad, string filenameSpeed)
+int Graph::readBeijingTD(string filenameRoad, string filenameSpeed, int slotNum)
 {
     int roadNum;
     ifstream inRoad(filenameRoad);
@@ -262,7 +262,6 @@ int Graph::readBeijingTD(string filenameRoad, string filenameSpeed)
     cout << "Reading Speed Data " << filenameSpeed << endl;
     string s;
     stringstream ss;
-    int slotNum = itvLen / 300;
     for (int i = 0; i < roadNum; i++)
     {
         inSpeed >> s;
@@ -293,34 +292,80 @@ int Graph::readBeijingTD(string filenameRoad, string filenameSpeed)
             vSupport.assign(4, {NodeOrder[vEdge[i].ID1]});
         else
             vSupport.assign(4, {NodeOrder[vEdge[i].ID2]});
-        vEdge[i].lpf = LPFunction(vEdge[i].ID1, vEdge[i].ID2, lBound, uBound, vEdge[i].vX, vEdge[i].vY, acc);
+//        vector<int> vSupport(288 / slotNum - 1, vEdgeInBG[i].ID1);
+        /*	int minY = 99999;
+            int maxY = -1;
+            for(auto& iY : vEdgeInBG[i].vY)
+            {
+                if(minY > iY)
+                    minY = iY;
+                if(maxY < iY)
+                    maxY = iY;
+            }
+            vEdgeInBG[i].lpf = LPFunction(vEdgeInBG[i].vX, vEdgeInBG[i].vY, vEdgeInBG[i].ID1, vEdgeInBG[i].ID2, 300 * 3 * slotNum, minY, maxY);  */
+        // vEdgeInBG[i].lpf = LPFunction(vEdgeInBG[i].ID1, vEdgeInBG[i].ID2, 300 * 3 * 4,
+        //                   vEdgeInBG[i].vX, vEdgeInBG[i].vY, vSupport);
+        vEdge[i].lpf = LPFunction(vEdge[i].ID1, vEdge[i].ID2, lBound, uBound, vEdge[i].vX, vEdge[i].vY);
 
     }
     inSpeed.close();
 
+/*	for(int i = 0; i < adjEdgeRInBG.size(); i++)
+	{
+		int ID2 = i;
+		for(int j = 0; j < adjEdgeRInBG[i].size(); j++)
+		{
+			int ID1 = adjEdgeRInBG[i][j].first;
+			if(vEdgeInBG[adjEdgeRInBG[i][j].second].ID1 != ID1)
+				adjEdgeRInBG[i][j].second = vEdgeInBG[adjEdgeRInBG[i][j].second].twinID;
+		}
+	}
+*/
+/*	for(int i = 0; i < adjEdgeInBG.size(); i++)
+	{
+		int ID1 = i;
+		for(int j = 0; j < adjEdgeInBG[i].size(); j++)
+		{
+			int ID2 = adjEdgeInBG[i][j].first;
+			if(vEdgeInBG[adjEdgeInBG[i][j].second].ID1 != ID1 || vEdgeInBG[adjEdgeInBG[i][j].second].lpf.ID1 != ID1)
+				cout << "Forward Error:" << ID1 << "," << vEdgeInBG[adjEdgeInBG[i][j].second].ID1 << "," << vEdgeInBG[adjEdgeInBG[i][j].second].lpf.ID1 << "\t" << ID2 << "," << vEdgeInBG[adjEdgeInBG[i][j].second].ID2 << "," << vEdgeInBG[adjEdgeInBG[i][j].second].lpf.ID2 << endl;
+		}
+	}
+
+	for(int i = 0; i < adjEdgeRInBG.size(); i++)
+	{
+		int ID2 = i;
+		for(int j = 0; j < adjEdgeRInBG[i].size(); j++)
+		{
+			int ID1 = adjEdgeRInBG[i][j].first;
+			if(vEdgeInBG[adjEdgeRInBG[i][j].second].ID1 != ID1 || vEdgeInBG[adjEdgeRInBG[i][j].second].lpf.ID1 != ID1)
+				cout << "Backward Error:" << ID1 << "," << vEdgeInBG[adjEdgeRInBG[i][j].second].ID1 << "," << vEdgeInBG[adjEdgeRInBG[i][j].second].lpf.ID1 << "\t" << ID2 << "," << vEdgeInBG[adjEdgeRInBG[i][j].second].ID2 << "," << vEdgeInBG[adjEdgeRInBG[i][j].second].lpf.ID2 << endl;
+		}
+	}
+*/
     return 0;
 }
 
-void Graph::readExtension(vector<pair<int,int>> &testdata, int newUpperbound)
+void Graph::readExtension(vector<pair<int, int>> &testdata, int newUpperbound)
 {
     testdata.clear();
     for (auto &edge: vEdge)
     {
         assert(newUpperbound == edge.vX.back());
         int ID1 = edge.ID1, ID2 = edge.ID2;
-        int actualWeight = edge.vYFull[newUpperbound/itvLen];
+        int actualWeight = edge.vYFull[newUpperbound / itvLen];
 //        if (edge.lpf.upperBound < appendPoint * 300)
 //            edge.lpf.extendFunction(appendPoint * 300 - 7200, appendPoint * 300);
         if (actualWeight != edge.lpf.vY.back())
         {
-            testdata.push_back({ID1,ID2});
+            testdata.push_back({ID1, ID2});
             edge.lpf.vY[edge.lpf.vY.size() - 1] = actualWeight;
             edge.vY[edge.vY.size() - 1] = actualWeight;
 //            intermediateSCs[ID1][ID1][ID2].vY.end()[-1] = actualWeight;
         }
 
         edge.lpf = LPFunction(
-                ID1, ID2, lBound, newUpperbound, edge.vX, edge.vY, acc);
+                ID1, ID2, lBound, newUpperbound, edge.vX, edge.vY);
         int lVid = NodeOrder[ID1] < NodeOrder[ID2] ? ID1 : ID2;
         for (int j = 0; j < edge.lpf.vX.size() - 1; j++)
         {
@@ -329,7 +374,257 @@ void Graph::readExtension(vector<pair<int,int>> &testdata, int newUpperbound)
     }
 }
 
-void Graph::readUndirectedGraph(string mapfile, string speedfile, int lowerB, int upperB, int slotNum)
+
+void Graph::readODs(string filename, vector<pair<int, int>> &vOD, int nodeNum)
+{
+    ifstream in(filename.c_str());
+    if (!in)
+    {
+        cout << "Cannot open file " << filename << endl;
+        return;
+    }
+
+    int ID1, ID2;
+    while (in >> ID1 >> ID2)
+    {
+        ID1 = ID1 % nodeNum;
+        ID2 = ID2 % nodeNum;
+        vOD.push_back(make_pair(ID1, ID2));
+    }
+    in.close();
+}
+
+LPFunction Graph::forwardSearch(int ID1, int ID2, int &miny)
+{
+    benchmark::heap<2, int, int> queue(nodeNum + 1);
+    vector<int> vTime(nodeNum + 1, INF);
+    vector<bool> bVisited(nodeNum + 1, false);
+    vector<bool> vbHeap(nodeNum + 1, false); //true if in Heap
+    vector<bool> vbLPF(nodeNum + 1, false); // true if ever been reached
+    LPFunction lpfInit;
+    vector<LPFunction> vLPF(nodeNum + 1, lpfInit);
+
+    int topNodeID, topNodeDist, neighborNodeID, neighborRoadID;
+    int i, minCost;
+    bool bUpdated;
+
+    vTime[ID1] = lBound;
+    vbHeap[ID1] = true;
+    bVisited[ID1] = true;
+    vbLPF[ID1] = true;
+    queue.update(ID1, lBound);
+    while (!queue.empty())
+    {
+        queue.extract_min(topNodeID, topNodeDist);
+        vbHeap[topNodeID] = false;
+        bVisited[topNodeID] = true;
+
+        if (topNodeID == ID1)
+        {
+            LPFunction lpf;
+            vLPF[topNodeID] = lpf;
+        }
+
+        if (topNodeID > nodeNum or topNodeID == ID2)
+            break;
+
+        for (i = 0; i < adjEdge[topNodeID].size(); i++)
+        {
+            bUpdated = false;
+            neighborNodeID = adjEdge[topNodeID][i].first;
+            neighborRoadID = adjEdge[topNodeID][i].second;
+
+            LPFunction lpf;
+            if (topNodeID == ID1)
+            {
+                lpf = vEdge[neighborRoadID].lpf; // lpf: ID1 -> x
+                if (ID1 == vEdge[neighborRoadID].ID2)
+                {
+                    assert(false);
+                    // lpf.ID1 == topNodeID == ID1 == ID2 cannot happen
+                    lpf.ID1 = vEdge[neighborRoadID].ID2;
+                    lpf.ID2 = vEdge[neighborRoadID].ID1;
+                }
+            } else
+            {
+                LPFunction lpftmp = vEdge[neighborRoadID].lpf;
+                if (topNodeID == vEdge[neighborRoadID].ID2)
+                {
+                    // topNodeID == lpftmp.ID1 == lpftmp.ID1
+                    assert(false);
+                    lpftmp.ID1 = vEdge[neighborRoadID].ID2;
+                    lpftmp.ID2 = vEdge[neighborRoadID].ID1;
+                }
+                lpf = vLPF[topNodeID].LPFCatSupport(lpftmp, lBound, uBound); // lpf: u -> x
+            }
+
+            if (lpf.vX.size() == 1)
+                continue;
+
+            if (vbLPF[neighborNodeID])
+            {
+                //vLPF[neighborNodeID].display()
+                //lpf.display();
+                if (vLPF[neighborNodeID].vX.size() > 1 and vLPF[neighborNodeID].dominate(lpf))
+                    continue;
+//                vLPF[neighborNodeID] = vLPF[neighborNodeID].LPFMinNew3(lpf);
+                vLPF[neighborNodeID] = vLPF[neighborNodeID].LPFMinSupForDec(lpf);
+                bUpdated = true;
+            } else
+            {
+                vLPF[neighborNodeID] = lpf;
+                vbLPF[neighborNodeID] = true;
+                bUpdated = true;
+            }
+
+            minCost = vLPF[neighborNodeID].minY;
+
+            //Updated and not in Heap
+            if ((!vbHeap[neighborNodeID] && bUpdated) || !bVisited[neighborNodeID])
+            {
+                vTime[neighborNodeID] = minCost;
+                queue.update(neighborNodeID, minCost);
+                vbHeap[neighborNodeID] = true;
+                bVisited[neighborNodeID] = true;
+            }
+                //Updated and in Heap, key changed
+            else if (bUpdated && vbHeap[neighborNodeID])
+            {
+                vTime[neighborNodeID] = minCost;
+                queue.update(neighborNodeID, minCost);
+            }
+        }
+    }
+    miny = vLPF[ID2].minY;
+    return vLPF[ID2];
+}
+
+//void Graph::readDirectedGraph(string mapfile, string speedfile, int lBound, int uBound, int deltaWinNum)
+//{
+//    ifstream in(mapfile.c_str());
+//    if (!in)
+//    {
+//        cout << "Cannot open file " << mapfile << endl;
+//        return;
+//    }
+//    LPFunction lpf;
+//    cout << "Thread num: " << threadNum << endl;
+//
+//    string x;
+//    in >> x >> nodeNum >> edgeNum;
+//
+//    adjList.assign(nodeNum + 1, vector<pair<int, int> >());
+//    adjListR.assign(nodeNum + 1, vector<pair<int, int> >());
+//    adjEdge.assign(nodeNum + 1, vector<pair<int, int> >());
+//    adjEdgeR.assign(nodeNum + 1, vector<pair<int, int> >());
+//
+//    Edge eTmp;
+//    vEdge.assign(edgeNum, eTmp);
+//
+//    int ID1, ID2, roadID = 0;
+//    while (in >> ID1 >> ID2)
+//    {
+//        adjList[ID1].push_back(make_pair(ID2, 10));
+//        adjListR[ID2].push_back(make_pair(ID1, 10));
+//
+//        adjEdge[ID1].push_back(make_pair(ID2, roadID));
+//        adjEdgeR[ID2].push_back(make_pair(ID1, roadID));
+//
+//        Edge e;
+//        e.edgeID = roadID;
+//        e.ID1 = ID1;
+//        e.ID2 = ID2;
+//        vEdge[e.edgeID] = e;
+//        roadID += 1;
+//    }
+//    in.close();
+//
+//    detNodeOrder();
+//    ifstream inSpeed(speedfile.c_str());
+//    if (!inSpeed)
+//    {
+//        cout << "Cannot open speed file " << speedfile << endl;
+//    }
+//
+//    itvLen = 300 * slotnum;
+//    lBound = slotnum * 300 * winNum1, uBound = slotnum * 300 * (winNum2 - 1);
+//    cout << "Time domain: " << lBound << " " << uBound << ", slotnum: " << slotnum << endl;
+//    string s;
+//    stringstream ss;
+//    for (int i = 0; i < roadID; i++)
+//    {
+//        int u = vEdge[i].ID1, v = vEdge[i].ID2, revRID = -1;
+//        for (auto &j: adjEdge[v])
+//        {
+//            if (j.first == u)
+//            {
+//                // there is same edge with reverse direction
+//                revRID = j.second;
+//                break;
+//            }
+//        }
+//
+//        int lVid = NodeOrder[u] < NodeOrder[v] ? u : v;
+//        revRID = edgeNum + 1; // if revRID is very large, then w(a,b) and w(b,a) would be different
+//        if (revRID > i)
+//        {
+//            // i'm edge(u,v), edge(v, u) is not initialized yet
+//            // if vEdgeInBG[i] already has
+//            inSpeed >> s;
+//            vector<string> vs = Tools::split(s, ",");
+//            vector<int> vX, vY;
+//            vX.reserve(288); // 1 day = 288 5-minutes
+//            vY.assign(288, -1);
+//            for (int j = 0; j < 288; j++)
+//            {
+//                vX.push_back(j * 300);
+//                ss.clear();
+//                ss.str("");
+//                ss << vs[j];
+//                ss >> vY[j];
+//            }
+//            // vX = {600 * i, i = 0, 1, 2,..., 285}
+//            vEdge[i].vXFull = vX;
+//            vEdge[i].vYFull = vY;
+////            if (u == 2722 and v == 2721)
+////                cout << 1;
+////            vEdge[i].vX.assign(vX.begin() + winNum1, vX.begin() + winNum2);
+////            vEdge[i].vY.assign(vY.begin() + winNum1, vY.begin() + winNum2);
+//            for (int j = winNum1; j < winNum2; j++)
+//            {
+//                assert(j * slotnum < vEdge[i].vYFull.size());
+//                vEdge[i].vX.push_back(vX[j * slotnum]);
+//                vEdge[i].vY.push_back(vY[j * slotnum]);
+//            }
+//            vEdge[i].lpf = LPFunction(u, v, lBound, uBound, vEdge[i].vX, vEdge[i].vY);
+//
+//            for (int j = 0; j < vEdge[i].lpf.vX.size() - 1; j++)
+//            {
+//                vEdge[i].lpf.vSupportPre.push_back({{lVid, {j}}});
+//            }
+//        } else
+//        {
+//            // i'm edge(u,v), edge(v, u) is initialized
+//            vEdge[i].vXFull = vEdge[revRID].vXFull;
+//            vEdge[i].vYFull = vEdge[revRID].vYFull;
+//
+//            vEdge[i].vX.assign(vEdge[revRID].vXFull.begin() + winNum1, vEdge[revRID].vXFull.begin() + winNum2);
+//            vEdge[i].vY.assign(vEdge[revRID].vYFull.begin() + winNum1, vEdge[revRID].vYFull.begin() + winNum2);
+//            vEdge[i].lpf = LPFunction(u, v, lBound, uBound, vEdge[revRID].vX, vEdge[revRID].vY);
+//
+//            for (int j = 0; j < vEdge[i].lpf.vX.size() - 1; j++)
+//            {
+//                map<int, vector<int>> mp = {{lVid, {j}}};
+//                vEdge[i].lpf.vSupportPre.push_back(mp);
+//            }
+//        }
+//    }
+//    inSpeed.close();
+//
+//    cout << "Finish loading graph, nodeNum: " << nodeNum << endl;
+//}
+
+void Graph::readDirectedGraph(string mapfile, string speedfile, int lowerB, int upperB, int slotNum)
 {
     ifstream in(mapfile.c_str());
     if (!in)
@@ -341,10 +636,8 @@ void Graph::readUndirectedGraph(string mapfile, string speedfile, int lowerB, in
     lBound = lowerB, uBound = upperB, deltaT = 300 * slotNum;
     int winNum1 = lBound / deltaT, winNum2 = upperB / deltaT;
 
-
     string x;
     in >> x >> nodeNum >> edgeNum;
-
 
     adjList.assign(nodeNum + 1, vector<pair<int, int> >());
     adjListR.assign(nodeNum + 1, vector<pair<int, int> >());
@@ -384,74 +677,47 @@ void Graph::readUndirectedGraph(string mapfile, string speedfile, int lowerB, in
     map<int, int> turningPointMap;
     for (int i = 0; i < roadID; i++)
     {
-        int u = vEdge[i].ID1, v = vEdge[i].ID2, revRID = -1;
-        for (auto &j: adjEdge[v])
-        {
-            if (j.first == u)
-            {
-                // there is same edge with reverse direction
-                revRID = j.second;
-                break;
-            }
-        }
+        int u = vEdge[i].ID1, v = vEdge[i].ID2;
 
         int lVid = NodeOrder[u] < NodeOrder[v] ? u : v;
-        revRID = edgeNum + 1; // if revRID is very large, then w(a,b) and w(b,a) would be different
 //        int slotnum = itvLen / 300;
-        if (revRID > i)
+
+        // i'm edge(u,v), edge(v, u) is not initialized yet
+        // if vEdgeInBG[i] already has
+        inSpeed >> s;
+        vector<string> vs = Tools::split(s, ",");
+        vector<int> vX, vY;
+        vX.reserve(288); // 1 day = 288 5-minutes
+        vY.assign(288, -1);
+        for (int j = 0; j < 288; j++)
         {
-            // i'm edge(u,v), edge(v, u) is not initialized yet
-            // if vEdgeInBG[i] already has
-            inSpeed >> s;
-            vector<string> vs = Tools::split(s, ",");
-            vector<int> vX, vY;
-            vX.reserve(288); // 1 day = 288 5-minutes
-            vY.assign(288, -1);
-            for (int j = 0; j < 288; j++)
-            {
-                vX.push_back(j * 300);
-                ss.clear();
-                ss.str("");
-                ss << vs[j];
-                ss >> vY[j];
-            }
-            // vX = {600 * i, i = 0, 1, 2,..., 285}
-            vEdge[i].vXFull = vX;
-            vEdge[i].vYFull = vY;
+            vX.push_back(j * 300);
+            ss.clear();
+            ss.str("");
+            ss << vs[j];
+            ss >> vY[j];
+        }
+        // vX = {600 * i, i = 0, 1, 2,..., 285}
+        vEdge[i].vXFull = vX;
+        vEdge[i].vYFull = vY;
 
-            for (int j = winNum1; j <= winNum2; j++)
-            {
-                assert(j * slotNum < vEdge[i].vYFull.size());
-                vEdge[i].vX.push_back(vX[j * slotNum]);
-                vEdge[i].vY.push_back(vY[j * slotNum]);
-            }
-            vEdge[i].vY[vEdge[i].vY.size() - 1] = vEdge[i].vY[vEdge[i].vY.size() - 2];
-
-            vEdge[i].lpf = LPFunction(
-                    u, v, lBound, uBound, vEdge[i].vX, vEdge[i].vY, acc);
-            if (turningPointMap.find(vEdge[i].lpf.vX.size()) == turningPointMap.end())
-                turningPointMap[vEdge[i].lpf.vX.size()] = 1;
-            else
-                turningPointMap[vEdge[i].lpf.vX.size()] += 1;
-            for (int j = 0; j < vEdge[i].lpf.vX.size() - 1; j++)
-            {
-                vEdge[i].lpf.vSupportPre.push_back({{lVid, {j}}});
-            }
-        } else
+        for (int j = winNum1; j <= winNum2; j++)
         {
-            // i'm edge(u,v), edge(v, u) is initialized
-            vEdge[i].vXFull = vEdge[revRID].vXFull;
-            vEdge[i].vYFull = vEdge[revRID].vYFull;
+            assert(j * slotNum < vEdge[i].vYFull.size());
+            vEdge[i].vX.push_back(vX[j * slotNum]);
+            vEdge[i].vY.push_back(vY[j * slotNum]);
+        }
+//            vEdge[i].vY[vEdge[i].vY.size() - 1] = vEdge[i].vY[vEdge[i].vY.size() - 2]; // virtual concatenation
 
-            vEdge[i].vX.assign(vEdge[revRID].vXFull.begin() + winNum1, vEdge[revRID].vXFull.begin() + winNum2);
-            vEdge[i].vY.assign(vEdge[revRID].vYFull.begin() + winNum1, vEdge[revRID].vYFull.begin() + winNum2);
-            vEdge[i].lpf = LPFunction(u, v, lBound, uBound, vEdge[revRID].vX, vEdge[revRID].vY, acc);
-
-            for (int j = 0; j < vEdge[i].lpf.vX.size() - 1; j++)
-            {
-                map<int, vector<int>> mp = {{lVid, {j}}};
-                vEdge[i].lpf.vSupportPre.push_back(mp);
-            }
+        vEdge[i].lpf = LPFunction(
+                u, v, lBound, uBound, vEdge[i].vX, vEdge[i].vY);
+        if (turningPointMap.find(vEdge[i].lpf.vX.size()) == turningPointMap.end())
+            turningPointMap[vEdge[i].lpf.vX.size()] = 1;
+        else
+            turningPointMap[vEdge[i].lpf.vX.size()] += 1;
+        for (int j = 0; j < vEdge[i].lpf.vX.size() - 1; j++)
+        {
+            vEdge[i].lpf.vSupportPre.push_back({{lVid, {j}}});
         }
     }
     inSpeed.close();
@@ -472,9 +738,10 @@ void Graph::readUndirectedGraph(string mapfile, string speedfile, int lowerB, in
 //        cout << v << ", ";
 //    cout << endl;
     cout << "Finish loading graph, " << "|V|: " << nodeNum << ", |E|: " << edgeNum << ", Thread num: "
-         << threadNum << ", Accuracy: " << acc << ", Time domain: " << lBound << " " << uBound
+         << threadNum << ", Time domain: " << lBound << " " << uBound
          << " SlotNum: " << slotNum << ", Avg turnP num: " << 1.0 * turnSum / edgeNum << endl;
 }
+
 
 void Graph::readUndirectedGraph(string mapfile, string speedfile, string orderfile, int slotnum)
 {
@@ -581,7 +848,7 @@ void Graph::readUndirectedGraph(string mapfile, string speedfile, string orderfi
 //            vEdge[i].vX.assign(vX.begin(), vX.begin() + 5);
             vEdge[i].vX = {0, 900, 1800, 2700, 3600};
             vEdge[i].vY.assign(vY.begin(), vY.begin() + 5);
-            vEdge[i].lpf = LPFunction(u, v, lBound, uBound, vEdge[i].vX, vEdge[i].vY, acc);
+            vEdge[i].lpf = LPFunction(u, v, lBound, uBound, vEdge[i].vX, vEdge[i].vY);
 
             for (int j = 0; j < vEdge[i].lpf.vX.size() - 1; j++)
             {
@@ -595,7 +862,7 @@ void Graph::readUndirectedGraph(string mapfile, string speedfile, string orderfi
 
             vEdge[i].vX.assign(vEdge[revRID].vXFull.begin(), vEdge[revRID].vXFull.begin() + 5);
             vEdge[i].vY.assign(vEdge[revRID].vYFull.begin(), vEdge[revRID].vYFull.begin() + 5);
-            vEdge[i].lpf = LPFunction(u, v, lBound, uBound, vEdge[revRID].vX, vEdge[revRID].vY, acc);
+            vEdge[i].lpf = LPFunction(u, v, lBound, uBound, vEdge[revRID].vX, vEdge[revRID].vY);
 
             for (int j = 0; j < vEdge[i].lpf.vX.size() - 1; j++)
             {
@@ -610,13 +877,13 @@ void Graph::readUndirectedGraph(string mapfile, string speedfile, string orderfi
 
 int Graph::DijkstraPath(int ID1, int ID2, vector<int> &vPath, vector<int> &vPathEdge)
 {
-    benchmark::heap<2, int, int> queue(nodeNum);
+    benchmark::heap<2, int, int> queue(adjList.size());
     queue.update(ID1, 0);
 
-    vector<int> vDistance(nodeNum, INF);
-    vector<int> vPrevious(nodeNum, -1);
-    vector<int> vPreviousEdge(nodeNum, -1);
-    vector<bool> vbVisited(nodeNum, false);
+    vector<int> vDistance(adjList.size(), INF);
+    vector<int> vPrevious(adjList.size(), -1);
+    vector<int> vPreviousEdge(adjList.size(), -1);
+    vector<bool> vbVisited(adjList.size(), false);
     int topNodeID, neighborNodeID, neighborLength, neighborRoadID;
 
     vDistance[ID1] = 0;
@@ -734,6 +1001,48 @@ int Graph::DijkstraPath2(int ID1, int ID2, unordered_set<int> &sRemovedNode, vec
     return vDistance[ID2];
 }
 
+int Graph::Dijkstra(int ID1, int ID2)
+{
+    benchmark::heap<2, int, int> queue(adjList.size());
+    queue.update(ID1, 0);
+
+    vector<int> vDistance(nodeNum, INF);
+    vector<bool> vbVisited(nodeNum, false);
+    int topNodeID, neighborNodeID, neighborLength;
+    vector<pair<int, int> >::iterator ivp;
+
+    vDistance[ID1] = 0;
+
+    compareNode cnTop;
+    while (!queue.empty())
+    {
+        int topDistance;
+        queue.extract_min(topNodeID, topDistance);
+        vbVisited[topNodeID] = true;
+//		cout << topNodeID << "\t" << vDistance[topNodeID] << endl;
+        if (topNodeID == ID2)
+            break;
+
+        for (ivp = adjList[topNodeID].begin(); ivp != adjList[topNodeID].end(); ivp++)
+        {
+            neighborNodeID = (*ivp).first;
+            neighborLength = (*ivp).second;
+            int d = vDistance[topNodeID] + neighborLength;
+            if (!vbVisited[neighborNodeID])
+            {
+                if (vDistance[neighborNodeID] > d)
+                {
+                    vDistance[neighborNodeID] = d;
+                    queue.update(neighborNodeID, d);
+                }
+            }
+        }
+    }
+
+    return vDistance[ID2];
+}
+
+
 void Graph::Dijkstra(int ID1, int ID2, int t, int &result)
 {
     benchmark::heap<2, int, int> queue(nodeNum);
@@ -781,6 +1090,118 @@ void Graph::Dijkstra(int ID1, int ID2, int t, int &result)
     return;
 }
 
+
+int Graph::AStar(int ID1, int ID2)
+{
+    benchmark::heap<2, int, int> queue(adjList.size());
+    vector<int> vDistance(adjList.size(), INF);
+    vector<bool> vbVisited(adjList.size(), false);
+    int topNodeID, neighborNodeID, neighborLength;
+    vector<pair<int, int> >::iterator ivp;
+
+    queue.update(ID1, EuclideanDistance(ID1, ID2));
+    vDistance[ID1] = 0;
+
+    compareNode cnTop;
+    while (!queue.empty())
+    {
+        int topDistance;
+        queue.extract_min(topNodeID, topDistance);
+        vbVisited[topNodeID] = true;
+
+        if (topNodeID == ID2)
+            break;
+
+        for (ivp = adjList[topNodeID].begin(); ivp != adjList[topNodeID].end(); ivp++)
+        {
+            neighborNodeID = (*ivp).first;
+            neighborLength = (*ivp).second;
+            int d = vDistance[topNodeID] + neighborLength;
+            if (!vbVisited[neighborNodeID])
+            {
+                if (vDistance[neighborNodeID] > d)
+                {
+                    vDistance[neighborNodeID] = d;
+                    queue.update(neighborNodeID, d + EuclideanDistance(neighborNodeID, ID2));
+                }
+            }
+        }
+    }
+
+    return vDistance[ID2];
+}
+
+int Graph::AStarPath(int ID1, int ID2, vector<int> &vPath, vector<int> &vPathEdge, string &city)
+{
+    benchmark::heap<2, int, int> queue(adjList.size());
+    vector<int> vDistance(adjList.size(), INF);
+    vector<int> vPrevious(adjList.size(), -1);
+    vector<int> vPreviousEdge(adjList.size(), -1);
+    vector<bool> vbVisited(adjList.size(), false);
+    int topNodeID, neighborNodeID, neighborLength, neighborRoadID;
+
+    int latU, lonU;
+    if (city == "US")
+    {
+        lonU = 84000;
+        latU = 69000;
+    } else
+    {
+        lonU = 83907;
+        latU = 111319;
+    }
+
+    queue.update(ID1, EuclideanDistance(ID1, ID2));
+    vDistance[ID1] = 0;
+
+    compareNode cnTop;
+    while (!queue.empty())
+    {
+        int topDistance;
+        queue.extract_min(topNodeID, topDistance);
+        vbVisited[topNodeID] = true;
+
+        if (topNodeID == ID2)
+            break;
+
+        for (int i = 0; i < (int) adjList[topNodeID].size(); i++)
+        {
+            neighborNodeID = adjList[topNodeID][i].first;
+            neighborLength = adjList[topNodeID][i].second;
+            neighborRoadID = adjEdge[topNodeID][i].second;
+            int d = vDistance[topNodeID] + neighborLength;
+            if (!vbVisited[neighborNodeID])
+            {
+                if (vDistance[neighborNodeID] > d)
+                {
+                    vDistance[neighborNodeID] = d;
+                    queue.update(neighborNodeID, d + EuclideanDistance(neighborNodeID, ID2));
+                    vPrevious[neighborNodeID] = topNodeID;
+                    vPreviousEdge[neighborNodeID] = neighborRoadID;
+                }
+            }
+        }
+    }
+
+    vPath.clear();
+    vPathEdge.clear();
+    vPath.push_back(ID2);
+    int p = vPrevious[ID2];
+    int e = vPreviousEdge[ID2];
+    while (p != -1)
+    {
+        vPath.push_back(p);
+        vPathEdge.push_back(e);
+        e = vPreviousEdge[p];
+        p = vPrevious[p];
+    }
+
+    reverse(vPath.begin(), vPath.end());
+    reverse(vPathEdge.begin(), vPathEdge.end());
+
+    return vDistance[ID2];
+}
+
 inline int Graph::EuclideanDistance(int ID1, int ID2)
 {
     int lat = (int) (abs(vCoor[ID1].first - vCoor[ID2].first) * 111319);
@@ -810,13 +1231,13 @@ inline int Graph::EuclideanDistanceAdaptive(int ID1, int ID2, int latU, int lonU
 //Need to create 2hop only with functions
 //Init 2hop to empty
 //normal fastest path query
-LPFunction Graph::forwardSearch(int ID1, int ID2, int &miny)
+LPFunction Graph::forwardSearch(int ID1, int ID2)
 {
     benchmark::heap<2, int, int> queue(nodeNum + 1);
     vector<int> vTime(nodeNum + 1, INF);
+    vector<bool> vbHeap(nodeNum + 1, false);//Store if in Heap
     vector<bool> bVisited(nodeNum + 1, false);
-    vector<bool> vbHeap(nodeNum + 1, false); //true if in Heap
-    vector<bool> vbLPF(nodeNum + 1, false); // true if ever been reached
+    vector<bool> vbLPF(nodeNum + 1, false);
     LPFunction lpfInit;
     vector<LPFunction> vLPF(nodeNum + 1, lpfInit);
 
@@ -824,11 +1245,11 @@ LPFunction Graph::forwardSearch(int ID1, int ID2, int &miny)
     int i, minCost;
     bool bUpdated;
 
-    vTime[ID1] = lBound;
+    vTime[ID1] = 0;
     vbHeap[ID1] = true;
     bVisited[ID1] = true;
     vbLPF[ID1] = true;
-    queue.update(ID1, lBound);
+    queue.update(ID1, 0);
     while (!queue.empty())
     {
         queue.extract_min(topNodeID, topNodeDist);
@@ -841,8 +1262,11 @@ LPFunction Graph::forwardSearch(int ID1, int ID2, int &miny)
             vLPF[topNodeID] = lpf;
         }
 
-        if (topNodeID > nodeNum or topNodeID == ID2)
-            break;
+        if (topNodeID > nodeNum)
+            if (topNodeID == ID2)
+            {
+                break;
+            }
 
         for (i = 0; i < adjEdge[topNodeID].size(); i++)
         {
@@ -850,15 +1274,20 @@ LPFunction Graph::forwardSearch(int ID1, int ID2, int &miny)
             neighborNodeID = adjEdge[topNodeID][i].first;
             neighborRoadID = adjEdge[topNodeID][i].second;
 
+            if (neighborNodeID > nodeNum)
+
+                if (neighborRoadID > vEdge.size())
+
+                    if (neighborNodeID == ID1)
+                        continue;
+
             LPFunction lpf;
             if (topNodeID == ID1)
             {
-                lpf = vEdge[neighborRoadID].lpf; // lpf: ID1 -> x
+                lpf = vEdge[neighborRoadID].lpf;
                 if (ID1 == vEdge[neighborRoadID].ID2)
                 {
-                    assert(false);
-                    // lpf.ID1 == topNodeID == ID1 == ID2 cannot happen
-                    lpf.ID1 = vEdge[neighborRoadID].ID2;
+                    lpf.ID1 = ID1;
                     lpf.ID2 = vEdge[neighborRoadID].ID1;
                 }
             } else
@@ -866,12 +1295,10 @@ LPFunction Graph::forwardSearch(int ID1, int ID2, int &miny)
                 LPFunction lpftmp = vEdge[neighborRoadID].lpf;
                 if (topNodeID == vEdge[neighborRoadID].ID2)
                 {
-                    // topNodeID == lpftmp.ID1 == lpftmp.ID1
-                    assert(false);
                     lpftmp.ID1 = vEdge[neighborRoadID].ID2;
                     lpftmp.ID2 = vEdge[neighborRoadID].ID1;
                 }
-                lpf = vLPF[topNodeID].LPFCatSupport(lpftmp, lBound, uBound, 0); // lpf: u -> x
+                lpf = vLPF[topNodeID].LPFCatSupport(lpftmp, -1, INF);
             }
 
             if (lpf.vX.size() == 1)
@@ -881,10 +1308,10 @@ LPFunction Graph::forwardSearch(int ID1, int ID2, int &miny)
             {
                 //vLPF[neighborNodeID].display()
                 //lpf.display();
-                if (vLPF[neighborNodeID].vX.size() > 1 and vLPF[neighborNodeID].dominate(lpf, 5))
+                if (vLPF[neighborNodeID].vX.size() > 1 and vLPF[neighborNodeID].dominate(lpf))
                     continue;
 //                vLPF[neighborNodeID] = vLPF[neighborNodeID].LPFMinNew3(lpf);
-                vLPF[neighborNodeID] = vLPF[neighborNodeID].LPFMinSupForDec(lpf, 0);
+                vLPF[neighborNodeID] = vLPF[neighborNodeID].LPFMinSupForDec(lpf);
                 bUpdated = true;
             } else
             {
@@ -911,27 +1338,7 @@ LPFunction Graph::forwardSearch(int ID1, int ID2, int &miny)
             }
         }
     }
-    miny = vLPF[ID2].minY;
     return vLPF[ID2];
-}
-
-void Graph::readODs(string filename, vector<pair<int, int>> &vOD, int nodeNum)
-{
-    ifstream in(filename.c_str());
-    if (!in)
-    {
-        cout << "Cannot open file " << filename << endl;
-        return;
-    }
-
-    int ID1, ID2;
-    while (in >> ID1 >> ID2)
-    {
-        ID1 = ID1 % nodeNum;
-        ID2 = ID2 % nodeNum;
-        vOD.push_back(make_pair(ID1, ID2));
-    }
-    in.close();
 }
 
 void Graph::readUpdates(string filename, int nodeNum, vector<pair<pair<int, int>, pair<int, double>>> &testdata)
@@ -954,8 +1361,9 @@ void Graph::readUpdates(string filename, int nodeNum, vector<pair<pair<int, int>
     cout << "Finish reading updates" << endl;
 }
 
-void Graph::readUpdates2(std::string filename, int nodeNum, int timeSlot,
-                         double frac, vector<pair<pair<int, int>, pair<int, double>>> &testdata)
+void Graph::readUpdates2(
+        std::string filename, int nodeNum, int timeSlot, double frac,
+        vector<pair<pair<int, int>, pair<int, double>>> &testdata)
 {
     int ID1, ID2;
     testdata.clear();
@@ -965,16 +1373,11 @@ void Graph::readUpdates2(std::string filename, int nodeNum, int timeSlot,
         cout << "Cannot open update file " << filename << endl;
         return;
     }
-    int cnt = 0;
     while (IF >> ID1 >> ID2)
     {
         ID1 = ID1 % nodeNum;
         ID2 = ID2 % nodeNum;
         testdata.emplace_back(make_pair(ID1, ID2), make_pair(timeSlot, frac));
-
-        cnt++;
-        if (cnt >= 1000)
-            break;
     }
     IF.close();
     cout << "Finish reading " << testdata.size() << " updates at time " << timeSlot << endl;
@@ -1019,7 +1422,7 @@ void Graph::decUpdate(vector<pair<pair<int, int>, pair<int, double>>> &testdata,
                     lpf.minY = newW;
 
                 vector<int> newVX = lpf.vX, newVY = lpf.vY;
-                lpf.setValue(newVX, newVY, -1, 0);
+                lpf.setValue(newVX, newVY);
 
                 int lid = NodeOrder[a] < NodeOrder[b] ? a : b;
                 lpf.vSupportPre.clear();
@@ -1074,7 +1477,7 @@ void Graph::incUpdate(vector<pair<pair<int, int>, pair<int, double>>> &testdata,
                 }
 
                 vector<int> newVX = lpf.vX, newVY = lpf.vY;
-                lpf.setValue(newVX, newVY, -1, acc);
+                lpf.setValue(newVX, newVY);
 
                 int lid = NodeOrder[a] < NodeOrder[b] ? a : b;
                 lpf.vSupportPre.clear();

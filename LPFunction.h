@@ -78,28 +78,27 @@ public:
     int maxY{}; // max{vY}
     //True: a min cost function, in-label
     //False: a cost function, out-label, need to refine the upper bound
-    int lastItvSubToChange{};
+//    int lastItvSubToChange{};
     int lowerBound, upperBound;
-
-    //test if (x2,y2) can be removed
-    static bool redundant(int x1, int y1, int x2, int y2, int x3, int y3, int acc);
 
     static int computeY(int x1, int x2, int y1, int y2, int x);
 
-    int setValue(vector<int> &vX2, vector<int> &vY2, int compStartX, int acc);
+    //test if (x2,y2) can be removed
+
+    int setValue(vector<int> &vX2, vector<int> &vY2, int compStartX = -1);
 
     int setValueNoComp(vector<int> &vX2, vector<int> &vY2);
 
     int setValue(vector<int> &vX2, vector<int> &vY2,
-                 vector<map<int, vector<int>>> &vSup, vector<int> &cntRec, int compStartX, int acc);
+                 vector<map<int, vector<int>>> &vSup, vector<int> &cntRec, int compStartX = -1);
 
     int setValue(vector<int> &vX2, vector<int> &vY2, vector<map<int, vector<int>>> &vSup, vector<int> &cntRec,
                  const vector<unordered_map<int, unordered_map<int, CatSupRec>>> &intermediateLPFs,
-                 int compStartX = -1, int acc = 0);
+                 int compStartX = -1);
 
     LPFunction(int id1, int id2, int lowerBound, int upperBound);
 
-    LPFunction(int id1, int id2, int lowerBound, int upperBound, vector<int> &vX, vector<int> &vY, int acc);
+    LPFunction(int id1, int id2, int lowerBound, int upperBound, vector<int> &vX, vector<int> &vY);
 
     LPFunction(int id1, int id2, int lowerBound, int upperBound,
                vector<int> &vX, vector<int> &vY, vector<map<int, vector<int>>> &vSupport);
@@ -123,9 +122,9 @@ public:
 
     int getX(int x1, int y1, int x2, int y2, int f2x) const;
 
-    bool equal(const LPFunction &f2, int acc = 0) const;
+    bool equal(const LPFunction &f2) const;
 
-    bool equal(LPFunction &f2, vector<int> &changedPos, int acc = 0) const;
+    bool equal(LPFunction &f2, vector<int> &changedPos) const;
 
     int LPFGetX(int y);
 
@@ -135,12 +134,11 @@ public:
 
     LPFunction LPFCatSupportNoComp(const LPFunction &f2, int lBound, int uBound);
 
-    LPFunction LPFCatSupport(LPFunction &f2, int lBound, int uBound, int acc);
+    LPFunction LPFCatSupport(LPFunction &f2, int lBound, int uBound);
 
-    LPFunction LPFCatSupport(
-            LPFunction &f2, int lBound, int uBound, CatSupRec &catRec, int acc);
+    LPFunction LPFCatSupport(LPFunction &f2, CatSupRec &catRec, int startT=0);
 
-    LPFunction LPFCatSupportExtend(LPFunction &f2, int itvLen, CatSupRec &catSupRec, int acc);
+    LPFunction LPFCatSupportExtend(LPFunction &f2, int itvLen, CatSupRec &catSupRec);
 
     void scSupToLbSup(int lid);
 
@@ -152,15 +150,15 @@ public:
 
     LPFunction LPFMinSupByPlaneSweepNoSV(const LPFunction &lpf) const;
 
-    LPFunction LPFMinSupByPlaneSweepNoSV2(const LPFunction &lpf, int itvLen) const;
+    LPFunction LPFMinSupByPlaneSweepNoSV2(const LPFunction &lpf, int itvLen = 1800) const;
 
-    LPFunction LPFMinSupForDec(const LPFunction &lpf, int acc) const;
+    LPFunction LPFMinSupForDec(const LPFunction &lpf) const;
 
-    LPFunction LPFMinSupForExtend(const LPFunction &lpf, int itvLen, int acc) const;
+    LPFunction LPFMinSupForExtend(const LPFunction &lpf, int itvLen) const;
 
-    LPFunction LPFMinSupByPlaneSweep(const LPFunction &lpf, int acc) const;
+    LPFunction LPFMinSupByPlaneSweep(const LPFunction &lpf) const;
 
-    bool dominate(const LPFunction &f2, int acc) const;
+    bool dominate(const LPFunction &f2) const;
 
     int equalValue(const LPFunction &f2) const;
 
@@ -169,6 +167,8 @@ public:
     void display() const; // display the function (vX, vY, minX, minY, maxX, maxY
 
     void leftTrim(int lowerBound);
+
+    LPFunction LPFTruncate(int startT);
 };
 
 #endif

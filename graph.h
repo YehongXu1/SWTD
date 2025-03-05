@@ -22,7 +22,7 @@
 using namespace std;
 using namespace benchmark;
 
-static int threadNum = 5;
+static int threadNum = 1;
 
 
 typedef struct COMPARENODE
@@ -159,21 +159,15 @@ struct labelEnum
 class Graph
 {
 public:
-    Graph(){}; //Default constructor
+    Graph() {}
 
-    Graph(int slotnum, int accuracy)
-    {
-        itvLen = 300 * slotnum;
-        acc = accuracy;
-    }
-
-    Graph(string filenameGraph, string filenameMap, string filenameRoad, string filenameSpeed)
+    Graph(string filenameGraph, string filenameMap, string filenameRoad, string filenameSpeed, int slotNum)
     {
         //if(filenameGraph == "./beijingNodeClean")
         if (filenameGraph == "../beijingNodeDirected")
         {
             readBeijingMapDirectedNew(filenameGraph, filenameMap);
-            readBeijingTD(filenameRoad, filenameSpeed);
+            readBeijingTD(filenameRoad, filenameSpeed, slotNum);
         }
     }
 
@@ -182,7 +176,6 @@ public:
     int nodeNum;
     int edgeNum;
     int itvLen;
-    int acc;
 
     vector<vector<pair<int, int> > > adjList;    //neighborID, Distance
     vector<vector<pair<int, int> > > adjListR;
@@ -210,13 +203,14 @@ public:
 
     int readBeijingMapDirectedNew(string filenameGraph, string filenameMap);
 
-    int readBeijingTD(string filenameRoad, string filenameSpeed);
+    int readBeijingTD(string filenameRoad, string filenameSpeed, int slotNum);
 
-    void readUndirectedGraph(string mapfile, string speedfile, int winNo1, int winNo2, int slotNum);
+    void readDirectedGraph(string mapfile, string speedfile, int lowerB, int upperB, int slotNum);
 
     void readUndirectedGraph(string mapfile, string speedfile, string order, int slotnum);
 
     static void readODs(string filename, vector<pair<int, int>> &vOD, int nodeNum);
+
     static void readUpdates(string updateFile, int nodeNum, vector<pair<pair<int, int>, pair<int, double>>> &testdata);
 
     static void readUpdates2(string updateFile, int nodeNum, int timeSlot, double inc,
@@ -224,7 +218,7 @@ public:
 
     void readExtension(vector<pair<int, int>> &testdata, int appendPoint);
 
-    void H2HDecBatDiGraph(vector<pair<int, int>> &wBatch, int timeWinId, int timeWinLen);
+    void H2HDecBatDiGraph(vector<pair<pair<int, int>, pair<int, double>>> &wBatch, int timeWinId, int timeWinLen);
 
     void EachNodeDecMainThread(const vector<int> &startSources);
 
@@ -238,9 +232,11 @@ public:
             LPFunction &f1, const LPFunction &halfLPF,
             const vector<int> &halfLPFChangedPoses, bool isSC) const;
 
-    void H2HIncBatDiGraph(vector<pair<int, int>> &wBatch);
+    void CHUpdate(vector<pair<int, int>> &wBatch, int upd);
 
-    void CHUpdate(vector<pair<int, int>> &wBatch);
+    LPFunction forwardSearch(int sourceID, int targetID, int &miny);
+
+    void H2HIncBatDiGraph(vector<pair<int, int>> &wBatch, int updX);
 
     void EachNodeIncMainThread(const vector<int> &uRank);
 
@@ -253,8 +249,6 @@ public:
     void EachNodeExtendMainThread(const vector<int> &uRank);
 
     void EachNodeExtendMain(int uRank);
-
-    void EachNodeExtendMainRange(int begin, int end, const vector<int> &uRank);
 
     void EachNodeExtendMainRec(int uRank);
 
@@ -291,8 +285,6 @@ public:
 
     void CHConstruction();
 
-    void botUpVirtual();
-
     void TDContractionThread(
             int x, pair<int, int> pID, vector<pair<int, pair<LPFunction, int>>> &Neigh,
             vector<pair<int, pair<LPFunction, int>>> &NeighR);
@@ -304,8 +296,6 @@ public:
     void makeIndexDFS(int p, vector<int> &ancs);
 
     void makeIndexDFSThread();
-
-    void makeIndexDFSRange(int begin, int end, vector<pair<int, vector<int>>> &pAncs);
 
     void makeIndexDFSRec(int p, vector<int> &ancs);
 
@@ -333,13 +323,7 @@ public:
 
     void makeRMQDFS(int p, int height);
 
-    LPFunction QueryH2H(int ID1, int ID2,  long long int &LCASize);
-
-    int QueryH2HFixedT(int ID1, int ID2, int t,  long long int &LCASize);
-
-    int QueryCHFixedT(int ID1, int ID2, int t);
-
-    LPFunction QueryCHItvT(int ID1, int ID2, int &t);
+    LPFunction QueryH2H(int ID1, int ID2);
 
     int LCAQuery(int _p, int _q);
 
@@ -356,7 +340,7 @@ public:
 //    vector<unordered_map<int, bool> > vmLFinished;//SE+EInBG
 //    vector<unordered_map<int, bool> > vmLFinishedQuery;//SE+EInBG
 
-    LPFunction forwardSearch(int sourceID, int targetID, int &miny);
+    LPFunction forwardSearch(int sourceID, int targetID);
 
     void decUpdate(vector<pair<pair<int, int>, pair<int, double>>> &testdata, int timeWId, int timeWLen);
 
@@ -366,16 +350,40 @@ public:
 
     void indexSizeThread(int begin, int end, int &scSize, int &lbSize);
 
+    int Dijkstra(int ID1, int ID2);
+
     void Dijkstra(int ID1, int ID2, int t, int &result);
 
     int DijkstraPath(int ID1, int ID2, vector<int> &vPath, vector<int> &vPathEdge);
 
     int DijkstraPath2(int ID1, int ID2, unordered_set<int> &sRemovedNode, vector<int> &vPath, vector<int> &vPathEdge);
 
+    int AStar(int ID1, int ID2);
+
+    LPFunction QueryH2H(int ID1, int ID2,  long long int &LCASize);
+
+    int QueryH2HFixedT(int ID1, int ID2, int t,  long long int &LCASize);
+
+    int QueryCHFixedT(int ID1, int ID2, int t);
+
+    LPFunction QueryCHItvT(int ID1, int ID2, int &t);
+
+    int AStarPath(int ID1, int ID2, vector<int> &vPath, vector<int> &vPathEdge, string &city);
+
     int EuclideanDistance(int ID1, int ID2);
 
     int EuclideanDistanceAdaptive(int ID1, int ID2, int latU, int lonU);
 
+    // precompute
+    vector<TreeNode> precomputeSCForA();
+
+    void makeIndexForA(vector<TreeNode> &TreeForA);
+
+    void makeIndexDFSThreadForA(vector<TreeNode> &TreeForA);
+
+    void makeIndexDFSRecForA(vector<TreeNode> &TreeForA, int p, vector<int> &ancs);
+
+    void makeIndexDFSForA(vector<TreeNode> &TreeForA, int p, vector<int> &ancs);
 };
 
 

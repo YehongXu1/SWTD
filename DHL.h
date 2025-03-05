@@ -12,7 +12,7 @@ class DHL: public TDGTree
 
 public:
 
-    DHL(Graph &g, int acc);
+    DHL(Graph &g);
 
     void TDIFGen();
     void TDIFGenThread(vector<int> &leafNodes, int begin, int end);
@@ -24,7 +24,7 @@ public:
 
     void BuildDHLIndex();
 
-    void updateBorderLabel(vector<pair<int, int>> &wBatch);
+    void updateBorderLabel(vector<pair<int, int>> &wBatch, int upd);
     LPFunction DHLQuery(int u, int v);
 
     int DHLQuery(int u, int v, int t);
