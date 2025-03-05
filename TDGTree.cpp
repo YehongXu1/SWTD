@@ -4,9 +4,8 @@
 
 #include "DHL.h"
 
-TDGTree::TDGTree(Graph &g, int accInput) : graph(g)
+TDGTree::TDGTree(Graph &g) : graph(g)
 {
-    acc = accInput;
 }
 
 void TDGTree::ReadGTree(string &path)
@@ -187,7 +186,7 @@ void TDGTree::TDFloyd(HGPTreeNode &nd)
                 if (s == e || e == k || nd.dynMat[s][k].vX.size() < 2 || nd.dynMat[k][e].vX.size() < 2)
                     continue;
 
-                LPFunction lpfTmp = nd.dynMat[s][k].LPFCatSupport(nd.dynMat[k][e], graph.lBound, graph.uBound, acc);
+                LPFunction lpfTmp = nd.dynMat[s][k].LPFCatSupport(nd.dynMat[k][e], graph.lBound, graph.uBound);
 //                if (nd.dynMat[s][k].minY < 0 or nd.dynMat[k][e].minY > 7200)
 //                {
 ////                    nd.dynMat[s][e].display();
@@ -199,8 +198,8 @@ void TDGTree::TDFloyd(HGPTreeNode &nd)
                 {
                     nd.dynMat[s][e] = lpfTmp;
                 } else if (nd.dynMat[s][k].minY + nd.dynMat[k][e].minY < nd.dynMat[s][e].maxY and
-                           !nd.dynMat[s][e].dominate(lpfTmp, acc))
-                    nd.dynMat[s][e] = nd.dynMat[s][e].LPFMinSupForDec(lpfTmp, acc);
+                           !nd.dynMat[s][e].dominate(lpfTmp))
+                    nd.dynMat[s][e] = nd.dynMat[s][e].LPFMinSupForDec(lpfTmp);
             }
         }
 
@@ -422,7 +421,7 @@ void TDGTree::TopDGlobalOptMain(HGPTreeNode &ni)
 
                 if (nc.dynMat[bid1].find(bid2) == nc.dynMat[bid1].end() ||
                     nc.dynMat[bid1][bid2].vX.size() < 2 ||
-                    !ni.dynMat[bid1][bid2].equal(nc.dynMat[bid1][bid2], acc))
+                    !ni.dynMat[bid1][bid2].equal(nc.dynMat[bid1][bid2]))
                 {
                     nc.dynMat[bid1][bid2] = ni.dynMat[bid1][bid2];
                     dirty = true;
@@ -455,7 +454,7 @@ void TDGTree::TwoPMatrixBuild()
     cout << "TopDGlobalOpt time: " << timer.duration().count() << endl;
 }
 
-void TDGTree::Update(vector<pair<int, int>> &wBatch)
+void TDGTree::Update(vector<pair<int, int>> &wBatch, int upd)
 {
     dynMInit();
     benchmark::heap<2, int, int> UQ(graph.nodeNum);
@@ -475,20 +474,12 @@ void TDGTree::Update(vector<pair<int, int>> &wBatch)
             if (pp.first == v)
             {
                 LPFunction &lpf = graph.vEdge[pp.second].lpf;
-                if (distr(gen) <= 7)
-                {
-                    vX = lpf.vX.back();
-                    oldW = lpf.vY.back();
-                } else
-                {
-                    vX = lpf.vX.back() - graph.deltaT;
-                    oldW = lpf.getY(vX);
-                }
+                oldW = lpf.getY(upd);
 
                 if (distr(gen) <= 5)
-                    newW = ceil((double) oldW * 1.1);
+                    newW = oldW + 10;
                 else
-                    newW = ceil((double) oldW * 0.9);
+                    newW = ceil(oldW * 7);
 
                 vector<int>::const_iterator low;
                 low = lower_bound(lpf.vX.begin(), lpf.vX.end(), vX);
@@ -505,7 +496,7 @@ void TDGTree::Update(vector<pair<int, int>> &wBatch)
                 }
 
                 vector<int> newX = lpf.vX, newY = lpf.vY;
-                lpf.setValue(newX, newY, -1, acc);
+                lpf.setValue(newX, newY, -1);
                 for (int j = 0; j < lpf.vX.size() - 1; j++)
                 {
                     lpf.vSupportPre.push_back({{lId, {j}}});
@@ -557,12 +548,12 @@ void TDGTree::Update(vector<pair<int, int>> &wBatch)
                 if (bid1 == bid2)
                     continue;
 
-                if (!nf.dynMat[bid1][bid2].equal(ni.dynMat[bid1][bid2], acc))
+                if (!nf.dynMat[bid1][bid2].equal(ni.dynMat[bid1][bid2]))
                 {
                     if (nf.dynMat[bid1][bid2].vX.size() > 1 and
-                        nf.dynMat[bid1][bid2].dominate(ni.dynMat[bid1][bid2], acc))
+                        nf.dynMat[bid1][bid2].dominate(ni.dynMat[bid1][bid2]))
                     {
-                        nf.dynMat[bid1][bid2] = nf.dynMat[bid1][bid2].LPFMinSupForDec(ni.dynMat[bid1][bid2], acc);
+                        nf.dynMat[bid1][bid2] = nf.dynMat[bid1][bid2].LPFMinSupForDec(ni.dynMat[bid1][bid2]);
                     } else
                         nf.dynMat[bid1][bid2] = ni.dynMat[bid1][bid2];
                     dirty = true;
@@ -607,7 +598,7 @@ void TDGTree::Update(vector<pair<int, int>> &wBatch)
                     if (bid1 == bid2)
                         continue;
 
-                    if (!ni.dynMat[bid1][bid2].equal(nc.dynMat[bid1][bid2], acc))
+                    if (!ni.dynMat[bid1][bid2].equal(nc.dynMat[bid1][bid2]))
                     {
                         dirty = true;
                         nc.dynMat[bid1][bid2] = ni.dynMat[bid1][bid2];
@@ -856,13 +847,13 @@ LPFunction TDGTree::TIPQuery(int u, int v)
                         if (lpf.vX.size() < 2 or lpf2.vX.size() < 2)
                             continue;
 
-                        LPFunction lpfTmp = lpf.LPFCatSupport(lpf2, graph.lBound, graph.uBound, acc);
+                        LPFunction lpfTmp = lpf.LPFCatSupport(lpf2, graph.lBound, graph.uBound);
                         if (lpfMin.vX.size() < 2)
                         {
                             lpfMin = lpfTmp;
-                        } else if (lpf.minY + lpf2.minY <= lpfMin.maxY and !lpfMin.dominate(lpfMin, acc))
+                        } else if (lpf.minY + lpf2.minY <= lpfMin.maxY and !lpfMin.dominate(lpfMin))
                         {
-                            lpfMin = lpfMin.LPFMinSupForDec(lpfTmp, acc);
+                            lpfMin = lpfMin.LPFMinSupForDec(lpfTmp);
                         }
                     }
                 }
@@ -887,13 +878,13 @@ LPFunction TDGTree::TIPQuery(int u, int v)
         {
             continue;
         }
-        LPFunction lpfTmp = lpf.LPFCatSupport(lpf2, graph.lBound, graph.uBound, acc);
+        LPFunction lpfTmp = lpf.LPFCatSupport(lpf2, graph.lBound, graph.uBound);
         if (lpfMin.vX.size() < 2)
         {
             lpfMin = lpfTmp;
-        } else if (lpf.minY + lpf2.minY <= lpfMin.maxY and !lpfMin.dominate(lpfTmp, acc))
+        } else if (lpf.minY + lpf2.minY <= lpfMin.maxY and !lpfMin.dominate(lpfTmp))
         {
-            lpfMin = lpfMin.LPFMinSupForDec(lpfTmp, acc);
+            lpfMin = lpfMin.LPFMinSupForDec(lpfTmp);
         }
     }
 

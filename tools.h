@@ -68,6 +68,8 @@ public:
 
     static bool findFile(std::string filename);
 
+    static bool redundant(int x1, int y1, int x2, int y2, int x3, int y3);
+
 };
 
 template<class DT = std::chrono::milliseconds , class ClockT = std::chrono::high_resolution_clock>

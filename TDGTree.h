@@ -16,7 +16,6 @@ public:
 
     int PARTITION_PART_NF = 4;
     int LEAF_TAU = 6;
-    int acc;
     typedef struct
     {
         bool isborder;
@@ -49,7 +48,7 @@ public:
 
     Graph graph;
 
-    explicit TDGTree(Graph &g, int acc);
+    explicit TDGTree(Graph &g);
 
     void ReadGTree(string &path);
     void dynMInit();
@@ -71,7 +70,7 @@ public:
 
     void TwoPMatrixBuild();
     int LCA(int u, int v);
-    void Update(vector<pair<int, int>> &wBatch);
+    void Update(vector<pair<int, int>> &wBatch, int upd);
     void ArchiveDynM(string &path) const;
     void ReadDynM(string &path);
     LPFunction TIPQuery(int u, int v);
