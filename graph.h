@@ -207,6 +207,8 @@ public:
 
     void readDirectedGraph(string mapfile, string speedfile, int lowerB, int upperB, int slotNum);
 
+    void readExampleGraph(string mapfile, string speedfile, int lowerB, int upperB);
+
     void readUndirectedGraph(string mapfile, string speedfile, string order, int slotnum);
 
     static void readODs(string filename, vector<pair<int, int>> &vOD, int nodeNum);
@@ -384,6 +386,7 @@ public:
     void makeIndexDFSRecForA(vector<TreeNode> &TreeForA, int p, vector<int> &ancs);
 
     void makeIndexDFSForA(vector<TreeNode> &TreeForA, int p, vector<int> &ancs);
+
 };
 
 

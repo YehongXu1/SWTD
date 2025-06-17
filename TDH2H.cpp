@@ -1,5 +1,30 @@
 #include "graph.h"
 
+vector<int> NodeOrderss;
+
+struct OrderCompp
+{//prior to reture the vertex with smaller order
+    int x;
+
+    explicit OrderCompp(int _x)
+    {
+        x = _x;
+    }
+
+    bool operator<(const OrderCompp &d) const
+    {
+        if (x == d.x)
+        {//avoid the redundant
+            return false;
+        } else
+        {
+            if (x != d.x)
+                return NodeOrderss[x] < NodeOrderss[d.x];
+        }
+    }
+};
+
+
 void Graph::loadTD()
 {
     TDConstruction();
@@ -9,10 +34,11 @@ void Graph::TDConstruction()
 {
 //    cout << "TD Construction" << endl;
 
+
     Timer clock;
-//    clock.tick();
+    clock.tick();
     CHConstruction();
-//    clock.tock();
+    clock.tock();
 //    cout << "Contraction time: " << clock.duration().count() << endl;
 
     makeTree();
@@ -40,16 +66,16 @@ void Graph::TDConstruction()
 //                maxAncSize = (int) xx.ancIDs.size();
 //        }
 //    }
-//
+
 //    cout << "max childSize no:" << max << "\ttotal childSize no:" << total << endl;
 //    cout << "max tree width:" << maxWidth << "\ttotal tree width:" << totalWidth << endl;
 //    cout << "max anc size:" << maxAncSize << "\ttotal anc size:" << ancSize << endl;
 
     makeRMQ();
 
-//    clock.tick();
+    clock.tick();
     makeIndex();
-//    clock.tock();
+    clock.tock();
 //    cout << "Making index time: " << clock.duration().count() << endl;
 
 //    lBound += itvLen;
@@ -60,489 +86,13 @@ void Graph::TDConstruction()
 //    cout << "Extend index time: " << clock.duration().count() << endl;
 }
 
-void Graph::extendIndex()
-{
-    lBound += itvLen;
-    uBound += itvLen;
-    vector<pair<int, int>> vpID;
-    int thisThreadNum = threadNum;
-    int step = nodeNum / thisThreadNum;
-
-    vpID.reserve(thisThreadNum);
-    for (int i = 0; i < thisThreadNum - 1; i++)
-    {
-        vpID.emplace_back(i * step, (i + 1) * step);
-    }
-    vpID.emplace_back((thisThreadNum - 1) * step, nodeNum);
-
-
-    boost::thread_group threads;
-    for (int i = 0; i < thisThreadNum; i++)
-    {
-        threads.add_thread(
-                new boost::thread(
-                        &Graph::lastChangedPosInit, this, vpID[i].first, vpID[i].second));
-    }
-    threads.join_all();
-}
-
-void Graph::lastChangedPosInit(int begin, int end)
-{
-    for (int i = begin; i < end; i++)
-    {
-        for (auto &j: adjEdge[i])
-        {
-            vEdge[j.second].lpf.extendFunction(lBound, uBound);
-        }
-
-        for (auto &j: Tree[i].vertIn)
-        {
-            j.second.first.extendFunction(lBound, uBound);
-        }
-
-        for (auto &j: Tree[i].vertOut)
-        {
-            j.second.first.extendFunction(lBound, uBound);
-        }
-
-        for (auto &j: Tree[i].disIn)
-        {
-            j.extendFunction(lBound, uBound);
-        }
-
-        for (auto &j: Tree[i].disOut)
-        {
-            j.extendFunction(lBound, uBound);
-        }
-    }
-}
-
-void Graph::CHConstruction()
-{
-    intermediateSCs.clear();
-    intermediateSCs.assign(nodeNum, unordered_map < int, unordered_map < int, CatSupRec >> ());
-
-    intermediateLBsOut.clear();
-    intermediateLBsOut.assign(nodeNum, unordered_map < int, unordered_map < int, CatSupRec >> ());
-
-    intermediateLBsIn.clear();
-    intermediateLBsIn.assign(nodeNum, unordered_map < int, unordered_map < int, CatSupRec >> ());
-
-
-    SCconNodesMT.assign(nodeNum, {});
-    int debugID2 = 1, debugID1 = 1;
-    //Contracted Graph E
-    //Neighbor, Function
-    map<int, pair<LPFunction, int>> m;
-    E.assign(nodeNum, m);
-    ER.assign(nodeNum, m);
-    for (int i = 0; i < (int) adjEdge.size(); i++)
-    {
-        for (int j = 0; j < (int) adjEdge[i].size(); j++)
-        {
-            int u = i, v = adjEdge[i][j].first;
-            LPFunction lpf = vEdge[adjEdge[i][j].second].lpf;
-            E[u].insert({v, {lpf, 1}});
-
-            CatSupRec catSupRec;
-            catSupRec.vX1 = lpf.vX;
-            catSupRec.vX2 = lpf.vX;
-            catSupRec.vY = lpf.vY;
-//            catSupRec.extendEnd(uBound + itvLen, itvLen);
-            if (intermediateSCs[u].find(u) == intermediateSCs[u].end())
-                intermediateSCs[u].insert({u, {{v, catSupRec}}});
-            else if (intermediateSCs[u][u].find(v) == intermediateSCs[u][u].end())
-                intermediateSCs[u][u].insert({v, catSupRec});
-            else
-                intermediateSCs[u][u][v] = catSupRec;
-        }
-    }
-
-    for (int i = 0; i < (int) adjEdgeR.size(); i++)
-    {
-        for (int j = 0; j < (int) adjEdgeR[i].size(); j++)
-            // there is an edge (j, i) in the original graph
-            ER[i].insert({adjEdgeR[i][j].first, {vEdge[adjEdgeR[i][j].second].lpf, 1}});
-    }
-
-    vector<bool> exist(nodeNum, true);
-    vector<bool> change(nodeNum, false);
-
-    for (int i = 0; i < nodeNum; i++)
-    {
-        Semaphore *sm = new Semaphore(1);
-        vSm.push_back(std::move(sm));
-    }
-
-    //Contracted Neighbors
-    //Neighbor, <Distance, Supportive Node Number>
-    vector<pair<int, pair<LPFunction, int>>> vect;
-    NeighborCon.assign(nodeNum, vect);
-    NeighborConR.assign(nodeNum, vect);
-    //	SCconNodes.clear();
-
-//    cout << "** begin to contract" << endl;
-    int count = 0;
-    map<int, pair<LPFunction, int>> mlpf;
-//    vmSE.assign(nodeNum, mlpf);
-//    vmSER.assign(nodeNum, mlpf);
-
-    for (auto &x: vNodeOrder)
-    {
-        count++;
-//        if (x == 48251)
-//            cout << 1;
-//        if (count % 50000 == 0)
-//            cout << "count: " << count << endl;
-        vector<pair<int, pair<LPFunction, int>>> Neigh, NeighR;
-        for (auto &it: E[x])
-            if (exist[it.first])
-                Neigh.emplace_back(it);
-
-        for (auto &it: ER[x])
-            if (exist[it.first])
-                NeighR.emplace_back(it);
-
-        NeighborCon[x].assign(Neigh.begin(), Neigh.end());
-        NeighborConR[x].assign(NeighR.begin(), NeighR.end());
-
-        //Maintain E
-        for (auto &i: Neigh)
-        {
-            int y = i.first;
-            deleteE(x, y);
-        }
-
-        for (auto &i: NeighR)
-        {
-            int y = i.first;
-            deleteE(y, x);
-        }
-
-        int ID1, ID2;
-        LPFunction lpfTmp;
-//        cout << x << " " << Neigh.size() << endl;
-        if (NeighR.size() * Neigh.size() > 500 && NeighR.size() > 30)
-        {
-            vector<pair<int, int>> vpID;
-            vpID.reserve(threadNum);
-            int step = NeighR.size() / threadNum;
-            for (int i = 0; i < threadNum - 1; i++)
-            {
-                vpID.emplace_back(i * step, (i + 1) * step);
-            }
-            vpID.emplace_back((threadNum - 1) * step, NeighR.size());
-
-            for (auto &i: NeighR)
-            {
-                for (auto &j: Neigh)
-                {
-                    ID1 = i.first;
-                    ID2 = j.first;
-                    if (ID1 == ID2)
-                        continue;
-                    if (ID1 == debugID1 and ID2 == debugID2)
-                    {
-                        cout << "x:" << x << endl;
-                        i.second.first.display();
-                        j.second.first.display();
-                    }
-
-                    LPFunction lpfDummy;
-                    lpfDummy.ID1 = ID1;
-                    lpfDummy.ID2 = ID2;
-                    if (E[ID1].find(ID2) == E[ID1].end())
-                        E[ID1].insert({ID2, {lpfDummy, 1}});
-
-                    if (ER[ID2].find(ID1) == ER[ID2].end())
-                        ER[ID2].insert({ID1, {lpfDummy, 1}});
-
-                    SCconNodesMT[ID1][ID2].emplace_back(x);
-                    if (intermediateSCs[ID1].find(x) == intermediateSCs[ID1].end())
-                    {
-                        intermediateSCs[ID1].insert({x, {}});
-                    }
-                    if (intermediateSCs[ID1][x].find(ID2) == intermediateSCs[ID1][x].end())
-                    {
-                        CatSupRec catSupRec;
-                        intermediateSCs[ID1][x].insert({ID2, catSupRec});
-                    }
-
-//                    if (vmSE[ID1].find(ID2) == vmSE[ID1].end())
-//                        vmSE[ID1][ID2] = {lpfDummy, 1};
-//
-//                    if (vmSER[ID2].find(ID1) == vmSER[ID2].end())
-//                        vmSER[ID2][ID1] = {lpfDummy, 1};
-                }
-            }
-            boost::thread_group threads;
-            for (int i = 0; i < threadNum; i++)
-            {
-                threads.add_thread(
-                        new boost::thread(
-                                &Graph::TDContractionThread, this, x, boost::ref(vpID[i]),
-                                boost::ref(Neigh), boost::ref(NeighR)
-                        ));
-            }
-            threads.join_all();
-        } else
-        {
-            for (auto &i: NeighR)
-            {
-                for (auto &j: Neigh)
-                {
-                    ID1 = i.first;
-                    ID2 = j.first;
-                    if (ID1 == ID2)
-                        continue;
-
-                    if (ID1 == debugID1 and ID2 == debugID2)
-                    {
-                        cout << "x:" << x << endl;
-                        i.second.first.display();
-                        j.second.first.display();
-                    }
-
-//                    if (j.second.first.vX.size() <= 1)
-//                        continue;
-
-                    if (intermediateSCs[ID1].find(x) == intermediateSCs[ID1].end())
-                    {
-                        intermediateSCs[ID1].insert({x, {}});
-                    }
-                    CatSupRec catSupRec;
-                    lpfTmp = i.second.first.LPFCatSupport(j.second.first, lBound, uBound, catSupRec, acc);
-//                    catSupRec.extendEnd(uBound + itvLen, itvLen);
-                    intermediateSCs[ID1][x].insert({ID2, catSupRec});
-
-                    SCconNodesMT[ID1][ID2].push_back(x);
-                    insertE(ID1, ID2, lpfTmp);
-
-//                    if (vmSE[ID1].find(ID2) == vmSE[ID1].end() or vmSE[ID1][ID2].first.vX.size() <= 1)
-//                        vmSE[ID1][ID2] = {lpfTmp, 1};
-//                    else
-//                        vmSE[ID1][ID2] = {vmSE[ID1][ID2].first.LPFMinSupForDec(lpfTmp), 1};
-//
-//
-//                    if (vmSER[ID2].find(ID1) == vmSER[ID2].end() or vmSER[ID2][ID1].first.vX.size() <= 1)
-//                        vmSER[ID2][ID1] = {lpfTmp, 1};
-//                    else
-//                        vmSER[ID2][ID1] = {vmSER[ID2][ID1].first.LPFMinSupForDec(lpfTmp), 1};
-                }
-            }
-        }
-    }
-
-//    cout << "** finish contraction" << endl;
-}
-
-void Graph::TDContractionThread(
-        int x, pair<int, int> pID, vector<pair<int, pair<LPFunction, int>>> &Neigh,
-        vector<pair<int, pair<LPFunction, int>>> &NeighR)
-{
-    int ID1, ID2;
-    int skip = 0;
-    int cat = 0;
-    int min = 0;
-    for (int i = pID.first; i < pID.second; i++)
-    {
-        ID1 = NeighR[i].first;
-        if (NeighR[i].second.first.vX.size() <= 1)
-        {
-//            cout << "Left Size:" << NeighR[i].second.first.vX.size() << endl;
-            skip++;
-            continue;
-        }
-
-        for (auto &j: Neigh)
-        {
-            ID2 = j.first;
-
-            if (ID1 == 1 and ID2 == 1)
-                cout << 1;
-
-            if (ID1 == ID2)
-            {
-                skip++;
-                continue;
-            }
-
-            if (j.second.first.vX.size() <= 1)
-            {
-                skip++;
-                continue;
-            }
-
-            //E[ID1][ID2] exists a function and it is better
-
-            if (E[ID1][ID2].first.vX.size() > 1 &&
-                NeighR[i].second.first.minY + j.second.first.minY > E[ID1][ID2].first.maxY)
-            {
-                skip++;
-                continue;
-            }
-
-            CatSupRec &catSupRec = intermediateSCs[ID1][x][ID2];
-            LPFunction lpfTmp = NeighR[i].second.first.LPFCatSupport(j.second.first, lBound, uBound, catSupRec, acc);
-//            catSupRec.extendEnd(uBound + itvLen, itvLen);
-
-            cat++;
-            if (lpfTmp.vX.size() <= 1)
-            {
-                skip++;
-                continue;
-            }
-
-            LPFunction lpfExist = E[ID1][ID2].first;
-
-            if (lpfExist.vX.size() > 1)
-            {
-                min++;
-                if (!lpfExist.dominate(lpfTmp, acc))
-                {
-                    E[ID1][ID2] = {E[ID1][ID2].first.LPFMinSupByPlaneSweep(lpfTmp, acc), 1};
-                }
-            } else
-            {
-                E[ID1][ID2] = {lpfTmp, 1};
-            }
-
-
-            vSm[ID2]->wait();
-            ER[ID2][ID1] = E[ID1][ID2];
-            vSm[ID2]->notify();
-
-//            vmSER[ID2][ID1] = ER[ID2][ID1];
-//            vmSE[ID1][ID2] = vmSER[ID2][ID1];
-
-//            assert(lpfTmp.ID1 != lpfTmp.ID2);
-        }
-    }
-//    int total = NeighR.size() * Neigh.size();
-//    cout << "skip:" << skip << "\t" << (double) skip / total << "\t" << total - skip << endl;
-//    cout << "cat:" << cat << "\tmin:" << min << endl;
-}
-
-void Graph::makeTree()
-{
-    vector<int> vecemp;
-    VidtoTNid.assign(nodeNum, vecemp);
-    rank.clear();
-    rank.assign(nodeNum, 0);
-    int len = vNodeOrder.size() - 1;
-    heightMax = 0;
-
-    TreeNode rootNode;
-    int x = vNodeOrder[len];
-    assert(x >= 0);
-    while (x == -1) //to skip those vertices whose ID is -1
-    {
-        len--;
-        x = vNodeOrder[len];
-    }
-    rootNode.vertOut = NeighborCon[x];
-    rootNode.vertIn = NeighborConR[x];
-    rootNode.uniqueVertex = x;
-    rootNode.parentNodeID = -1;
-    rootNode.height = 1;
-    rank[x] = 0;
-    Tree.emplace_back(rootNode);
-    len--;
-
-    int nn;
-    for (; len >= 0; len--)
-    {
-        int y = vNodeOrder[len];
-        if (NeighborCon[y].empty() || NeighborConR[y].empty())
-            continue;
-        TreeNode nodeTmp;
-        nodeTmp.vertOut = NeighborCon[y];
-        nodeTmp.vertIn = NeighborConR[y];
-
-        nodeTmp.uniqueVertex = y;
-
-        int paRank;
-        if (!NeighborCon[y].empty())
-            paRank = deepestAnc(NeighborCon[y]);
-        else
-            paRank = deepestAnc(NeighborConR[y]);
-
-        Tree[paRank].vChildren.emplace_back(Tree.size());
-        nodeTmp.parentNodeID = paRank;
-        nodeTmp.height = Tree[paRank].height + 1;
-        nodeTmp.hdepth = Tree[paRank].height + 1;
-
-        for (auto &i: NeighborCon[y])
-        {
-            nn = i.first;
-            VidtoTNid[nn].emplace_back(Tree.size());
-            if (Tree[rank[nn]].hdepth < Tree[paRank].height + 1)
-                Tree[rank[nn]].hdepth = Tree[paRank].height + 1;
-        }
-
-        if (nodeTmp.height > heightMax)
-            heightMax = nodeTmp.height;
-
-        rank[y] = Tree.size();
-        Tree.emplace_back(nodeTmp);
-    }
-//    cout << "** making tree" << ", max height: " << heightMax << endl;
-}
-
-void Graph::makeRMQ()
-{
-    // explanation in https://www.youtube.com/watch?v=sD1IoalFomA
-    //EulerSeq.clear();
-    toRMQ.assign(nodeNum, 0);
-    //RMQIndex.clear();
-    makeRMQDFS(0, 1);
-    RMQIndex.push_back(EulerSeq);
-
-    int m = EulerSeq.size();
-    for (int i = 2, k = 1; i < m; i = i * 2, k++)
-    {
-        vector<int> tmp;
-        //tmp.clear();
-        tmp.assign(m, 0);
-        for (int j = 0; j < m - i; j++)
-        {
-            int x = RMQIndex[k - 1][j], y = RMQIndex[k - 1][j + i / 2];
-            if (Tree[x].height < Tree[y].height)
-                tmp[j] = x;
-            else tmp[j] = y;
-        }
-        RMQIndex.push_back(tmp);
-    }
-}
-
-int Graph::LCAQuery(int _p, int _q)
-{
-    int p = toRMQ[_p], q = toRMQ[_q];
-    if (p > q)
-    {
-        int x = p;
-        p = q;
-        q = x;
-    }
-    int len = q - p + 1;
-    int i = 1, k = 0;
-    while (i * 2 < len)
-    {
-        i *= 2;
-        k++;
-    }
-    q = q - i + 1;
-    if (Tree[RMQIndex[k][p]].height < Tree[RMQIndex[k][q]].height)
-        return RMQIndex[k][p];
-    else return RMQIndex[k][q];
-}
-
 LPFunction Graph::QueryH2H(int ID1, int ID2, long long int &LCASize)
 {
     if (ID1 == ID2)
         return LPFunction();
     int r1 = rank[ID1], r2 = rank[ID2];
     int LCA = LCAQuery(r1, r2);
+    int acc = 5;
 
     if (LCA == r1)
         return Tree[r2].disIn[Tree[r1].posIn.back()];
@@ -559,16 +109,16 @@ LPFunction Graph::QueryH2H(int ID1, int ID2, long long int &LCASize)
             if (lpfMin.vX.size() < 2)
             {
                 // lpfInit is not initialized
-                lpfMin = Tree[r1].disOut[x].LPFCatSupport(Tree[r2].disIn[x], lBound, uBound, acc);
+                lpfMin = Tree[r1].disOut[x].LPFCatSupport(Tree[r2].disIn[x], lBound, uBound);
             } else
             {
                 // lpfInit is initialized
                 if (Tree[r1].disOut[x].minY + Tree[r2].disIn[x].minY > lpfMin.maxY)
                     continue;
-                LPFunction disTmp = Tree[r1].disOut[x].LPFCatSupport(Tree[r2].disIn[x], lBound, uBound, acc);
-                if (!lpfMin.dominate(disTmp, acc))
+                LPFunction disTmp = Tree[r1].disOut[x].LPFCatSupport(Tree[r2].disIn[x], lBound, uBound);
+                if (!lpfMin.dominate(disTmp))
                 {
-                    lpfMin = lpfMin.LPFMinSupForDec(disTmp, acc);
+                    lpfMin = lpfMin.LPFMinSupForDec(disTmp);
                 }
             }
 //            for (int j = 0; j < Tree[LCA].posIn.size(); j++)
@@ -697,8 +247,7 @@ LPFunction Graph::QueryCHItvT(int ID1, int ID2, int &miny)
     vector<LPFunction> distFWD(nodeNum + 1, LPFunction()), distBKD(nodeNum + 1, LPFunction());
     vector<int> succIDVec(nodeNum + 1, -1);
 
-    int u, distU = 0, v, distV = 0, x;
-
+    int u, distU = 0, v, distV = 0, x, acc = 5;
     bool xUpdated;
     LPFunction mu = LPFunction();
 
@@ -732,7 +281,7 @@ LPFunction Graph::QueryCHItvT(int ID1, int ID2, int &miny)
             } else
             {
                 LPFunction lpftmp = p.second.first;
-                lpf = distFWD[u].LPFCatSupport(lpftmp, lBound, uBound, acc);
+                lpf = distFWD[u].LPFCatSupport(lpftmp, lBound, uBound);
             }
 
             if (lpf.vX.size() == 1)
@@ -740,9 +289,9 @@ LPFunction Graph::QueryCHItvT(int ID1, int ID2, int &miny)
 
             if (reachedFWD[x])
             {
-                if (distFWD[x].vX.size() > 1 and distFWD[x].dominate(lpf, acc))
+                if (distFWD[x].vX.size() > 1 and distFWD[x].dominate(lpf))
                     continue;
-                distFWD[x] = distFWD[x].LPFMinSupForDec(lpf, acc);
+                distFWD[x] = distFWD[x].LPFMinSupForDec(lpf);
                 xUpdated = true;
             } else
             {
@@ -779,7 +328,7 @@ LPFunction Graph::QueryCHItvT(int ID1, int ID2, int &miny)
                         if (pp.first == vid)
                         {
                             LPFunction copy = pp.second.first;
-                            dist = dist.LPFCatSupport(copy, lBound, uBound, acc); //pp.second.first.getY(dist);
+                            dist = dist.LPFCatSupport(copy, lBound, uBound); //pp.second.first.getY(dist);
                             break;
                         }
                     }
@@ -789,9 +338,9 @@ LPFunction Graph::QueryCHItvT(int ID1, int ID2, int &miny)
                 }
                 if (mu.vX.size() < 2)
                     mu = dist;
-                else if (!mu.dominate(dist, acc))
+                else if (!mu.dominate(dist))
                 {
-                    mu = mu.LPFMinSupForDec(dist, acc);
+                    mu = mu.LPFMinSupForDec(dist);
                 } else
                 {
                     return mu;
@@ -812,7 +361,7 @@ LPFunction Graph::QueryCHItvT(int ID1, int ID2, int &miny)
             } else
             {
                 LPFunction lpftmp = p.second.first;
-                lpf = lpftmp.LPFCatSupport(distBKD[v], lBound, uBound, acc); // x -> v -> ID2
+                lpf = lpftmp.LPFCatSupport(distBKD[v], lBound, uBound); // x -> v -> ID2
             }
 
             if (lpf.vX.size() == 1)
@@ -822,10 +371,10 @@ LPFunction Graph::QueryCHItvT(int ID1, int ID2, int &miny)
             {
                 //distFWD[x].display()
                 //lpf.display();
-                if (distBKD[x].vX.size() > 1 and distBKD[x].dominate(lpf, acc))
+                if (distBKD[x].vX.size() > 1 and distBKD[x].dominate(lpf))
                     continue;
 //                distFWD[x] = distFWD[x].LPFMinNew3(lpf);
-                distBKD[x] = distBKD[x].LPFMinSupForDec(lpf, acc);
+                distBKD[x] = distBKD[x].LPFMinSupForDec(lpf);
                 xUpdated = true;
                 succIDVec[x] = v;
             } else
@@ -855,6 +404,903 @@ LPFunction Graph::QueryCHItvT(int ID1, int ID2, int &miny)
         }
     }
     return mu;
+}
+
+
+void Graph::extendIndex()
+{
+    lBound += itvLen;
+    uBound += itvLen;
+    vector<pair<int, int>> vpID;
+    int thisThreadNum = threadNum;
+    int step = nodeNum / thisThreadNum;
+
+    vpID.reserve(thisThreadNum);
+    for (int i = 0; i < thisThreadNum - 1; i++)
+    {
+        vpID.emplace_back(i * step, (i + 1) * step);
+    }
+    vpID.emplace_back((thisThreadNum - 1) * step, nodeNum);
+
+
+    boost::thread_group threads;
+    for (int i = 0; i < thisThreadNum; i++)
+    {
+        threads.add_thread(
+                new boost::thread(
+                        &Graph::lastChangedPosInit, this, vpID[i].first, vpID[i].second));
+    }
+    threads.join_all();
+}
+
+void Graph::CHUpdate(vector<pair<int, int>> &wBatch, int updT)
+{
+    cout << "Index maintenance for " << wBatch.size() << " increase updates at " << updT << endl;
+    unordered_map<pair<int, int>, LPFunction, boost::hash<pair<int, int>>> OCdisOld;
+
+    // NodeOrderss.clear();
+    NodeOrderss.assign(NodeOrder.begin(), NodeOrder.end());
+    vector<set<int>> SCreIn, SCreOut; //SCre.clear();
+    set<int> ss; //ss.clear();
+    SCreIn.assign(nodeNum, ss), SCreOut.assign(nodeNum, ss); //{vertexID, set<int>}
+    set<OrderCompp> OC;
+    OC.clear();//vertexID in decreasing Node order
+
+    int debugID1 = 1, debugID2 = 1;
+    std::random_device rd; // obtain a random number from hardware
+    std::mt19937 gen(rd()); // seed the generator
+    std::uniform_int_distribution<> distr(1, 10);
+
+    for (const auto &k: wBatch)
+    {
+        int a = k.first;
+        int b = k.second;
+        if (a == debugID1 and b == debugID2)
+            cout << 1;
+        int lId = NodeOrder[a] < NodeOrder[b] ? a : b;
+//        int vX = uBound;
+        int newW, oldW, pos, vX;
+//        newW = k.second.second;
+//        double frac = k.second.second;
+        bool outOfBound = true;
+        for (const auto &i: adjEdge[a])
+        {
+            if (i.first == b)
+            {
+                LPFunction &lpf = vEdge[i.second].lpf;
+
+                oldW = lpf.getY(updT);
+
+                if (distr(gen) < 5)
+                    newW = oldW + 10;
+                else
+                    newW = ceil(oldW * 0.7);
+
+                vector<int>::const_iterator low;
+                low = lower_bound(lpf.vX.begin(), lpf.vX.end(), vX);
+                pos = (int) (low - lpf.vX.begin());
+
+                if (lpf.vX[pos] == vX)
+                {
+                    lpf.vY[pos] = newW;
+                } else if (lpf.vX[pos] > vX)
+                {
+                    lpf.vX.insert(low, vX);
+                    lpf.vY.insert(lpf.vY.begin() + pos, newW);
+                    assert(lpf.vX[pos] == vX);
+                }
+
+                vector<int> newX = lpf.vX, newY = lpf.vY;
+                lpf.setValue(newX, newY, -1);
+                for (int j = 0; j < lpf.vX.size() - 1; j++)
+                {
+                    lpf.vSupportPre.push_back({{lId, {j}}});
+                }
+
+//                low = lower_bound(lpf.vX.begin(), lpf.vX.end(), vX);
+//                pos = (int) (low - lpf.vX.begin());
+//                lpf.lastItvSubToChange = pos > 0 ? pos - 1 : 0;
+
+                CatSupRec catSupRec;
+                catSupRec.vX1 = lpf.vX;
+                catSupRec.vX2 = lpf.vX;
+                catSupRec.vY = lpf.vY;
+
+                intermediateSCs[a][a][b] = catSupRec;
+                break;
+            }
+        }
+
+        if (outOfBound)
+            continue;
+
+        if (lId == a)
+        {
+            for (const auto &j: Tree[rank[a]].vertOut)
+            {
+                if (j.first == b and j.second.first.vSupportContains(a))
+                {
+                    OCdisOld[{a, b}] = j.second.first;
+                    SCreOut[a].insert(b);
+                    OC.insert(OrderCompp(a));
+                    break;
+                }
+            }
+        } else
+        {
+            for (const auto &j: Tree[rank[b]].vertIn)
+            {
+                if (j.first == a and j.second.first.vSupportContains(b))
+                {
+                    OCdisOld[{a, b}] = j.second.first;
+                    SCreIn[b].insert(a);
+                    OC.insert(OrderCompp(b));
+                    break;
+                }
+            }
+        }
+    }
+    cout << "** finish sc refresh" << endl;
+
+    int ProID;
+    bool influence;
+
+    while (!OC.empty())
+    {
+        ProID = (*OC.begin()).x;
+        if (ProID == -1)
+            cout << 1;
+
+        OC.erase(OC.begin());
+        influence = false;
+
+//        cout << "ProID: " << ProID << " " << Tree[rank[ProID]].disIn.size() << endl;
+        for (const auto &Cid: SCreIn[ProID])
+        {
+            if (Cid == debugID1 and ProID == debugID2)
+                cout << 1;
+            int CidH = Tree[rank[Cid]].height - 1;
+            /* check if sc(cid,pid) is really influenced, if so, update it with the new function */
+            LPFunction scCPNew;
+            for (const auto &i: adjEdge[Cid])
+            {
+                if (i.first == ProID)
+                {
+                    scCPNew = vEdge[i.second].lpf;
+                    break;
+                }
+            }
+
+            for (auto &vs: SCconNodesMT[Cid][ProID])
+            {
+                LPFunction CidToVS, vsToProId;
+                for (const auto &i: Tree[rank[vs]].vertIn)
+                {
+                    if (i.first == Cid)
+                    {
+                        CidToVS = i.second.first;
+                        break;
+                    }
+                }
+                for (const auto &i: Tree[rank[vs]].vertOut)
+                {
+                    if (i.first == ProID)
+                    {
+                        vsToProId = i.second.first;
+                        break;
+                    }
+                }
+
+                LPFunction CPTmp;
+                bool empty = scCPNew.vX.size() <= 1;
+                CatSupRec &catSupRec = intermediateSCs[Cid][vs][ProID];
+                if (empty)
+                {
+                    CPTmp = CidToVS.LPFCatSupport(vsToProId, catSupRec);
+                    scCPNew = CPTmp;
+                } else if (CidToVS.minY + vsToProId.minY <= scCPNew.maxY)
+                {
+                    CPTmp = CidToVS.LPFCatSupport(vsToProId, catSupRec);
+                }
+
+                if (!empty and CPTmp.vX.size() > 1 and !scCPNew.dominate(CPTmp))
+                {
+                    scCPNew = scCPNew.LPFMinSupByPlaneSweep(CPTmp);
+                }
+            }
+
+            LPFunction scCPOld = OCdisOld[{Cid, ProID}];
+
+            vector<int> changedPos;
+            if (scCPOld.equal(scCPNew, changedPos))
+                continue;
+
+            for (auto &j: Tree[rank[ProID]].vertIn)
+            {
+                if (j.first == Cid)
+                {
+                    assert(scCPNew.ID1 == Cid and scCPNew.ID2 == ProID);
+                    j.second = {scCPNew, 1};
+                    break;
+                }
+            }
+
+            // HneiOut: <accessories contract after Cid, lpf from ProId to hid
+            unordered_set<int> HneiOut;
+            // LneiOut: accessories contract after ProId and before Cid, lpf from ProId to lid
+            vector<int> LneiOut;
+            for (auto &j: Tree[rank[ProID]].vertOut)
+            {
+                // j.first is the accessory of ProID
+                if (NodeOrder[j.first] > NodeOrder[Cid])
+                    HneiOut.insert(j.first);
+                else if (NodeOrder[j.first] < NodeOrder[Cid])
+                    LneiOut.emplace_back(j.first);
+            }
+
+            // in theory, scCPOld should dominate scCPNew, but due to rounding, domination may not hold
+            bool newSCDec = !scCPOld.dominate(scCPNew); // assert(newSCDec == false);
+
+            for (auto &i: Tree[rank[Cid]].vertOut)
+            {
+                int hid = i.first;
+                if (HneiOut.find(hid) != HneiOut.end())
+                {
+                    bool changed =
+                            newSCDec or i.second.second <= 0 or
+                            lpfIsSupportBy(i.second.first, scCPOld, changedPos, true);
+                    if (i.second.second > 0 and changed)
+                    {
+                        OCdisOld[{Cid, hid}] = i.second.first;
+                        SCreOut[Cid].insert(hid);
+                        OC.insert(OrderCompp(Cid));
+                        i.second.second = 0;
+                    }
+                }
+            }
+
+            for (auto &i: LneiOut)
+            {
+                int lid = i;
+                for (auto &j: Tree[rank[lid]].vertIn)
+                {
+                    if (j.first == Cid)
+                    {
+                        bool changed =
+                                newSCDec or j.second.second <= 0 or
+                                lpfIsSupportBy(j.second.first, scCPOld, changedPos, true);
+                        if (j.second.second > 0 and changed)
+                        {
+                            OCdisOld[{Cid, lid}] = j.second.first;
+                            SCreIn[lid].insert(Cid);
+                            OC.insert(OrderCompp(lid));
+                            j.second.second = 0;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        for (const auto &Cid: SCreOut[ProID])
+        {
+            if (Cid == debugID2 and ProID == debugID1)
+                cout << 1;
+            int CidH = Tree[rank[Cid]].height - 1;
+
+            /* check if sc(pid,cid) is really influenced, if so, update it with the new function */
+            LPFunction scPCNew;
+            for (const auto &i: adjEdge[ProID])
+            {
+                if (i.first == Cid)
+                {
+                    scPCNew = vEdge[i.second].lpf;
+                    break;
+                }
+            }
+
+            for (auto &vs: SCconNodesMT[ProID][Cid])
+            {
+                LPFunction ProidToVS, vsToCid;
+                for (const auto &i: Tree[rank[vs]].vertIn)
+                {
+                    if (i.first == ProID)
+                    {
+                        ProidToVS = i.second.first;
+                        break;
+                    }
+                }
+
+                for (const auto &i: Tree[rank[vs]].vertOut)
+                {
+                    if (i.first == Cid)
+                    {
+                        vsToCid = i.second.first;
+                        break;
+                    }
+                }
+
+                assert(ProidToVS.ID1 == ProID and vsToCid.ID2 == Cid);
+                LPFunction PCTmp;
+                bool empty = scPCNew.vX.size() <= 1;
+                CatSupRec &catSupRec = intermediateSCs[ProID][vs][Cid];
+                if (empty)
+                {
+                    PCTmp = ProidToVS.LPFCatSupport(vsToCid, catSupRec);
+                    scPCNew = PCTmp;
+                } else if (ProidToVS.minY + vsToCid.minY <= scPCNew.maxY)
+                {
+                    PCTmp = ProidToVS.LPFCatSupport(vsToCid, catSupRec);
+                }
+
+                if (!empty and PCTmp.vX.size() > 1 and !scPCNew.dominate(PCTmp))
+                {
+                    scPCNew = scPCNew.LPFMinSupByPlaneSweep(PCTmp);
+                }
+            }
+
+            LPFunction scPCOld = OCdisOld[{ProID, Cid}];
+            vector<int> changedPos;
+            if (scPCOld.equal(scPCNew, changedPos))
+                continue;
+            for (auto &j: Tree[rank[ProID]].vertOut)
+            {
+                if (j.first == Cid)
+                {
+                    assert(scPCNew.ID1 == ProID and scPCNew.ID2 == Cid);
+                    j.second = {scPCNew, 1};
+                    break;
+                }
+            }
+
+            unordered_set<int> HneiIn;
+            vector<int> LneiIn;
+            for (auto &i: Tree[rank[ProID]].vertIn)
+            {
+                // j.first is the accessory of ProID
+                if (NodeOrder[i.first] > NodeOrder[Cid])
+                    HneiIn.insert(i.first);
+                else if (NodeOrder[i.first] < NodeOrder[Cid])
+                    LneiIn.emplace_back(i.first);
+            }
+
+            // in theory, scCPOld should dominate scCPNew, but due to rounding, domination may not hold
+            bool newSCDec = !scPCOld.dominate(scPCNew); // assert(newSCDec == false);
+
+            for (auto &i: Tree[rank[Cid]].vertIn)
+            {
+                int hid = i.first;
+                if (HneiIn.find(hid) != HneiIn.end())
+                {
+                    bool changed =
+                            newSCDec or i.second.second <= 0 or
+                            lpfIsSupportBy(i.second.first, scPCOld, changedPos, true);
+                    if (i.second.second > 0 and changed)
+                    {
+                        OCdisOld[{hid, Cid}] = i.second.first;
+                        SCreIn[Cid].insert(hid);
+                        OC.insert(OrderCompp(Cid));
+                        i.second.second = 0;
+                    }
+                }
+            }
+
+            for (auto &lid: LneiIn)
+            {
+                for (auto &i: Tree[rank[lid]].vertOut)
+                {
+                    if (i.first == Cid)
+                    {
+                        bool changed =
+                                newSCDec or i.second.second <= 0 or
+                                lpfIsSupportBy(i.second.first, scPCOld, changedPos, true);
+                        if (i.second.second > 0 and changed)
+                        {
+                            OCdisOld[{lid, Cid}] = i.second.first;
+                            SCreOut[lid].insert(Cid);
+                            OC.insert(OrderCompp(lid));
+                            i.second.second = 0;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    cout << "** finish bottom-up refresh" << endl;
+}
+
+
+void Graph::lastChangedPosInit(int begin, int end)
+{
+//    for (int i = begin; i < end; i++)
+//    {
+//        for (auto &j: adjEdge[i])
+//        {
+//            vEdge[j.second].lpf.extendFunction(lBound, uBound);
+//        }
+//
+//        for (auto &j: Tree[i].vertIn)
+//        {
+//            j.second.first.extendFunction();
+//        }
+//
+//        for (auto &j: Tree[i].vertOut)
+//        {
+//            j.second.first.extendFunction(lBound, uBound);
+//        }
+//
+//        for (auto &j: Tree[i].disIn)
+//        {
+//            j.extendFunction(lBound, uBound);
+//        }
+//
+//        for (auto &j: Tree[i].disOut)
+//        {
+//            j.extendFunction(lBound, uBound);
+//        }
+//    }
+}
+
+void Graph::CHConstruction()
+{
+    intermediateSCs.clear();
+    intermediateSCs.assign(nodeNum, unordered_map<int, unordered_map<int, CatSupRec >>());
+
+    intermediateLBsOut.clear();
+    intermediateLBsOut.assign(nodeNum, unordered_map<int, unordered_map<int, CatSupRec >>());
+
+    intermediateLBsIn.clear();
+    intermediateLBsIn.assign(nodeNum, unordered_map<int, unordered_map<int, CatSupRec >>());
+
+    SCconNodesMT.assign(nodeNum, {});
+    int debugID1 = 0, debugID2 = 0;
+    //Contracted Graph E
+    //Neighbor, Function
+    map<int, pair<LPFunction, int>> m;
+    E.assign(nodeNum, m);
+    ER.assign(nodeNum, m);
+    for (int i = 0; i < (int) adjEdge.size(); i++)
+    {
+        for (int j = 0; j < (int) adjEdge[i].size(); j++)
+        {
+            int u = i, v = adjEdge[i][j].first;
+            LPFunction lpf = vEdge[adjEdge[i][j].second].lpf;
+            E[u].insert({v, {lpf, 1}});
+
+            CatSupRec catSupRec;
+            catSupRec.vX1 = lpf.vX;
+            catSupRec.vX2 = lpf.vX;
+            catSupRec.vY = lpf.vY;
+//            catSupRec.extendEnd(uBound + itvLen, itvLen);
+            if (intermediateSCs[u].find(u) == intermediateSCs[u].end())
+                intermediateSCs[u].insert({u, {{v, catSupRec}}});
+            else if (intermediateSCs[u][u].find(v) == intermediateSCs[u][u].end())
+                intermediateSCs[u][u].insert({v, catSupRec});
+            else
+                intermediateSCs[u][u][v] = catSupRec;
+        }
+    }
+
+    for (int i = 0; i < (int) adjEdgeR.size(); i++)
+    {
+        for (int j = 0; j < (int) adjEdgeR[i].size(); j++)
+            // there is an edge (j, i) in the original graph
+            ER[i].insert({adjEdgeR[i][j].first, {vEdge[adjEdgeR[i][j].second].lpf, 1}});
+    }
+
+    vector<bool> exist(nodeNum, true);
+    vector<bool> change(nodeNum, false);
+
+    for (int i = 0; i < nodeNum; i++)
+    {
+        Semaphore *sm = new Semaphore(1);
+        vSm.push_back(std::move(sm));
+    }
+
+    //Contracted Neighbors
+    //Neighbor, <Distance, Supportive Node Number>
+    vector<pair<int, pair<LPFunction, int>>> vect;
+    NeighborCon.assign(nodeNum, vect);
+    NeighborConR.assign(nodeNum, vect);
+    //	SCconNodes.clear();
+
+//    cout << "** begin to contract" << endl;
+    int count = 0;
+    map<int, pair<LPFunction, int>> mlpf;
+//    vmSE.assign(nodeNum, mlpf);
+//    vmSER.assign(nodeNum, mlpf);
+
+    for (auto &x: vNodeOrder)
+    {
+        count++;
+//        if (count % 50000 == 0)
+//            cout << "count: " << count << endl;
+        vector<pair<int, pair<LPFunction, int>>> Neigh, NeighR;
+        for (auto &it: E[x])
+            if (exist[it.first])
+                Neigh.emplace_back(it);
+
+        for (auto &it: ER[x])
+            if (exist[it.first])
+                NeighR.emplace_back(it);
+
+        NeighborCon[x].assign(Neigh.begin(), Neigh.end());
+        NeighborConR[x].assign(NeighR.begin(), NeighR.end());
+
+        //Maintain E
+        for (auto &i: Neigh)
+        {
+            int y = i.first;
+            deleteE(x, y);
+        }
+
+        for (auto &i: NeighR)
+        {
+            int y = i.first;
+            deleteE(y, x);
+        }
+
+        int ID1, ID2;
+        LPFunction lpfTmp;
+//        cout << x << " " << Neigh.size() << endl;
+        if (NeighR.size() * Neigh.size() > 500 && NeighR.size() > threadNum)
+        {
+            vector<pair<int, int>> vpID;
+            int step = NeighR.size() / threadNum;
+            for (int i = 0; i < threadNum - 1; i++)
+            {
+                vpID.emplace_back(i * step, (i + 1) * step);
+            }
+            vpID.emplace_back((threadNum - 1) * step, NeighR.size());
+
+            for (auto &i: NeighR)
+            {
+                for (auto &j: Neigh)
+                {
+                    ID1 = i.first;
+                    ID2 = j.first;
+                    if (ID1 == ID2)
+                        continue;
+                    if (ID1 == debugID1 and ID2 == debugID2)
+                    {
+                        cout << "x:" << x << endl;
+                        i.second.first.display();
+                        j.second.first.display();
+                    }
+
+                    LPFunction lpfDummy;
+                    lpfDummy.ID1 = ID1;
+                    lpfDummy.ID2 = ID2;
+                    if (E[ID1].find(ID2) == E[ID1].end())
+                        E[ID1].insert({ID2, {lpfDummy, 0}});
+
+                    if (ER[ID2].find(ID1) == ER[ID1].end())
+                        ER[ID2].insert({ID1, {lpfDummy, 0}});
+
+                    SCconNodesMT[ID1][ID2].emplace_back(x);
+                    if (intermediateSCs[ID1].find(x) == intermediateSCs[ID1].end())
+                    {
+                        intermediateSCs[ID1].insert({x, {}});
+                    }
+                    if (intermediateSCs[ID1][x].find(ID2) == intermediateSCs[ID1][x].end())
+                    {
+                        CatSupRec catSupRec;
+                        intermediateSCs[ID1][x].insert({ID2, catSupRec});
+                    }
+
+//                    if (vmSE[ID1].find(ID2) == vmSE[ID1].end())
+//                        vmSE[ID1][ID2] = {lpfDummy, 1};
+//
+//                    if (vmSER[ID2].find(ID1) == vmSER[ID2].end())
+//                        vmSER[ID2][ID1] = {lpfDummy, 1};
+                }
+            }
+            boost::thread_group threads;
+            for (int i = 0; i < threadNum; i++)
+            {
+                threads.add_thread(
+                        new boost::thread(
+                                &Graph::TDContractionThread, this, x, boost::ref(vpID[i]),
+                                boost::ref(Neigh), boost::ref(NeighR)
+                        ));
+            }
+            threads.join_all();
+        } else
+        {
+            for (auto &i: NeighR)
+            {
+                for (auto &j: Neigh)
+                {
+                    ID1 = i.first;
+                    ID2 = j.first;
+                    if (ID1 == ID2)
+                        continue;
+
+                    if (ID1 == debugID1 and ID2 == debugID2)
+                    {
+                        cout << "x:" << x << endl;
+                        i.second.first.display();
+                        j.second.first.display();
+                    }
+
+//                    if (j.second.first.vX.size() <= 1)
+//                        continue;
+
+                    if (intermediateSCs[ID1].find(x) == intermediateSCs[ID1].end())
+                    {
+                        intermediateSCs[ID1].insert({x, {}});
+                    }
+                    CatSupRec catSupRec;
+                    lpfTmp = i.second.first.LPFCatSupport(j.second.first, catSupRec);
+//                    catSupRec.extendEnd(uBound + itvLen, itvLen);
+                    intermediateSCs[ID1][x].insert({ID2, catSupRec});
+
+                    SCconNodesMT[ID1][ID2].push_back(x);
+                    insertE(ID1, ID2, lpfTmp);
+
+//                    if (vmSE[ID1].find(ID2) == vmSE[ID1].end() or vmSE[ID1][ID2].first.vX.size() <= 1)
+//                        vmSE[ID1][ID2] = {lpfTmp, 1};
+//                    else
+//                        vmSE[ID1][ID2] = {vmSE[ID1][ID2].first.LPFMinSupForDec(lpfTmp), 1};
+//
+//
+//                    if (vmSER[ID2].find(ID1) == vmSER[ID2].end() or vmSER[ID2][ID1].first.vX.size() <= 1)
+//                        vmSER[ID2][ID1] = {lpfTmp, 1};
+//                    else
+//                        vmSER[ID2][ID1] = {vmSER[ID2][ID1].first.LPFMinSupForDec(lpfTmp), 1};
+                }
+            }
+        }
+    }
+
+//    cout << "** finish contraction" << endl;
+}
+
+void Graph::TDContractionThread(
+        int x, pair<int, int> pID, vector<pair<int, pair<LPFunction, int>>> &Neigh,
+        vector<pair<int, pair<LPFunction, int>>> &NeighR)
+{
+    int ID1, ID2;
+    int skip = 0;
+    int cat = 0;
+    int min = 0;
+    for (int i = pID.first; i < pID.second; i++)
+    {
+        ID1 = NeighR[i].first;
+        if (NeighR[i].second.first.vX.size() <= 1)
+        {
+//            cout << "Left Size:" << NeighR[i].second.first.vX.size() << endl;
+            skip++;
+            continue;
+        }
+
+        for (auto &j: Neigh)
+        {
+            ID2 = j.first;
+
+            if (ID1 == 1 and ID2 == 1)
+                cout << 1;
+
+            if (ID1 == ID2)
+            {
+                skip++;
+                continue;
+            }
+
+            if (j.second.first.vX.size() <= 1)
+            {
+                skip++;
+                continue;
+            }
+
+            //E[ID1][ID2] exists a function and it is better
+
+            if (E[ID1][ID2].first.vX.size() > 1 &&
+                NeighR[i].second.first.minY + j.second.first.minY > E[ID1][ID2].first.maxY)
+            {
+                skip++;
+                continue;
+            }
+
+            CatSupRec &catSupRec = intermediateSCs[ID1][x][ID2];
+            LPFunction lpfTmp = NeighR[i].second.first.LPFCatSupport(j.second.first, catSupRec);
+//            catSupRec.extendEnd(uBound + itvLen, itvLen);
+
+            cat++;
+            if (lpfTmp.vX.size() <= 1)
+            {
+                skip++;
+                continue;
+            }
+
+            LPFunction lpfExist = E[ID1][ID2].first;
+
+            if (lpfExist.vX.size() > 1)
+            {
+                min++;
+                if (!lpfExist.dominate(lpfTmp))
+                {
+                    E[ID1][ID2] = {E[ID1][ID2].first.LPFMinSupByPlaneSweep(lpfTmp), 1};
+                }
+            } else
+            {
+                E[ID1][ID2] = {lpfTmp, 1};
+            }
+
+
+            vSm[ID2]->wait();
+            ER[ID2][ID1] = E[ID1][ID2];
+            vSm[ID2]->notify();
+
+//            vmSER[ID2][ID1] = ER[ID2][ID1];
+//            vmSE[ID1][ID2] = vmSER[ID2][ID1];
+
+            assert(lpfTmp.ID1 != lpfTmp.ID2);
+        }
+    }
+//    int total = NeighR.size() * Neigh.size();
+//    cout << "skip:" << skip << "\t" << (double) skip / total << "\t" << total - skip << endl;
+//    cout << "cat:" << cat << "\tmin:" << min << endl;
+}
+
+
+void Graph::makeTree()
+{
+    vector<int> vecemp;
+    VidtoTNid.assign(nodeNum, vecemp);
+
+    rank.assign(nodeNum, 0);
+    int len = vNodeOrder.size() - 1;
+    heightMax = 0;
+
+    TreeNode rootNode;
+    int x = vNodeOrder[len];
+    while (x == -1) //to skip those vertices whose ID is -1
+    {
+        len--;
+        x = vNodeOrder[len];
+    }
+    rootNode.vertOut = NeighborCon[x];
+    rootNode.vertIn = NeighborConR[x];
+    rootNode.uniqueVertex = x;
+    rootNode.parentNodeID = -1;
+    rootNode.height = 1;
+    rank[x] = 0;
+    Tree.emplace_back(rootNode);
+    len--;
+
+    int nn;
+    for (; len >= 0; len--)
+    {
+        int y = vNodeOrder[len];
+        TreeNode nodeTmp;
+        nodeTmp.vertOut = NeighborCon[y];
+        nodeTmp.vertIn = NeighborConR[y];
+
+        nodeTmp.uniqueVertex = y;
+//        assert(!NeighborCon[y].empty() || !NeighborConR[y].empty());
+
+        int paRank;
+        if (!NeighborCon[y].empty())
+            paRank = deepestAnc(NeighborCon[y]);
+        else
+            paRank = deepestAnc(NeighborConR[y]);
+
+        if (paRank == -1)
+            continue;
+        Tree[paRank].vChildren.emplace_back(Tree.size());
+        nodeTmp.parentNodeID = paRank;
+        nodeTmp.height = Tree[paRank].height + 1;
+        nodeTmp.hdepth = Tree[paRank].height + 1;
+
+        for (auto &i: NeighborCon[y])
+        {
+            nn = i.first;
+            VidtoTNid[nn].emplace_back(Tree.size());
+            if (Tree[rank[nn]].hdepth < Tree[paRank].height + 1)
+                Tree[rank[nn]].hdepth = Tree[paRank].height + 1;
+        }
+
+        if (nodeTmp.height > heightMax)
+            heightMax = nodeTmp.height;
+
+        rank[y] = Tree.size();
+        Tree.emplace_back(nodeTmp);
+    }
+//    cout << "** making tree" << ", max height: " << heightMax << endl;
+}
+
+void Graph::makeRMQ()
+{
+    // explanation in https://www.youtube.com/watch?v=sD1IoalFomA
+    //EulerSeq.clear();
+    toRMQ.assign(nodeNum, 0);
+    //RMQIndex.clear();
+    makeRMQDFS(0, 1);
+    RMQIndex.push_back(EulerSeq);
+
+    int m = EulerSeq.size();
+    for (int i = 2, k = 1; i < m; i = i * 2, k++)
+    {
+        vector<int> tmp;
+        //tmp.clear();
+        tmp.assign(m, 0);
+        for (int j = 0; j < m - i; j++)
+        {
+            int x = RMQIndex[k - 1][j], y = RMQIndex[k - 1][j + i / 2];
+            if (Tree[x].height < Tree[y].height)
+                tmp[j] = x;
+            else tmp[j] = y;
+        }
+        RMQIndex.push_back(tmp);
+    }
+}
+
+int Graph::LCAQuery(int _p, int _q)
+{
+    int p = toRMQ[_p], q = toRMQ[_q];
+    if (p > q)
+    {
+        int x = p;
+        p = q;
+        q = x;
+    }
+    int len = q - p + 1;
+    int i = 1, k = 0;
+    while (i * 2 < len)
+    {
+        i *= 2;
+        k++;
+    }
+    q = q - i + 1;
+    if (Tree[RMQIndex[k][p]].height < Tree[RMQIndex[k][q]].height)
+        return RMQIndex[k][p];
+    else return RMQIndex[k][q];
+}
+
+LPFunction Graph::QueryH2H(int ID1, int ID2)
+{
+    int r1 = rank[ID1], r2 = rank[ID2];
+    int LCA = LCAQuery(r1, r2);
+
+    if (LCA == r1)
+        return Tree[r2].disIn[Tree[r1].posIn.back()];
+    else if (LCA == r2)
+        return Tree[r1].disOut[Tree[r2].posOut.back()];
+    else
+    {
+        LPFunction lpfMin;
+        for (int i = 0; i < Tree[LCA].posOut.size(); i++)
+        {
+            int x = Tree[LCA].posOut[i]; // x-th ancestor of LCA
+            for (int j = 0; j < Tree[LCA].posIn.size(); j++)
+            {
+                int y = Tree[LCA].posIn[j]; // y-th ancestor of LCA
+                if (x == y)
+                {
+                    if (lpfMin.vX.size() < 2)
+                    {
+                        // lpfInit is not initialized
+                        lpfMin = Tree[r1].disOut[x].LPFCatSupport(Tree[r2].disIn[x], lBound, uBound);
+                    } else
+                    {
+                        // lpfInit is initialized
+                        if (Tree[r1].disOut[x].minY + Tree[r2].disIn[x].minY > lpfMin.maxY)
+                            continue;
+                        LPFunction disTmp = Tree[r1].disOut[x].LPFCatSupport(Tree[r2].disIn[x], lBound, uBound);
+                        if (!lpfMin.dominate(disTmp))
+                        {
+                            lpfMin = lpfMin.LPFMinSupForDec(disTmp);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        return lpfMin;
+    }
 }
 
 void Graph::makeRMQDFS(int p, int height)
@@ -894,12 +1340,8 @@ void Graph::makeIndexDFSThread()
     for (int i: Tree[0].vChildren)
         S.push_back({i, {Tree[0].uniqueVertex}});
 
-//    int height = 0;
-    Timer clock;
-    while (!S.empty() and S.size() < threadNum)
+    while (!S.empty() and S.size() < 100)
     {
-        clock.tick();
-
         boost::thread_group threads;
         for (auto &i: S)
         {
@@ -909,35 +1351,6 @@ void Graph::makeIndexDFSThread()
                     ));
         }
         threads.join_all();
-
-//        int thisThreadNum = threadNum;
-//        if (S.size() < thisThreadNum)
-//        {
-//
-//        } else
-//        {
-//            vector<pair<int, int>> vPIDs;
-//            vPIDs.reserve(thisThreadNum);
-//            int step = (int) S.size() / thisThreadNum;
-//            for (int i = 0; i < thisThreadNum - 1; i++)
-//                vPIDs.emplace_back(i * step, (i + 1) * step);
-//
-//            vPIDs.emplace_back((thisThreadNum - 1) * step, S.size());
-//
-//            boost::thread_group threads;
-//            for (int i = 0; i < thisThreadNum; i++)
-//            {
-//                threads.add_thread(
-//                        new boost::thread(
-//                                &Graph::makeIndexDFSRange, this,
-//                                vPIDs[i].first, vPIDs[i].second, boost::ref(S)
-//                        ));
-//            }
-//            threads.join_all();
-//        }
-//        cout << "height: " << height << " S: " << S.size() << " time: " << clock.duration().count() << " ms" << endl;
-//        height++;
-
         vector<pair<int, vector<int>>> S2;
         S2.reserve(S.size() * 6);
         for (const auto &p: S)
@@ -949,12 +1362,9 @@ void Graph::makeIndexDFSThread()
                 S2.emplace_back(i, ancs);
             }
         }
-        clock.tock();
         S = S2;
     }
 
-    if (S.empty())
-        return;
 //    cout << "thread num: " << S.size() << endl;
     boost::thread_group threads;
     for (auto &i: S)
@@ -976,14 +1386,6 @@ void Graph::makeIndexDFSRec(int p, vector<int> &ancs)
         makeIndexDFSRec(i, ancs);
     }
     ancs.pop_back();
-}
-
-void Graph::makeIndexDFSRange(int begin, int end, vector<pair<int, vector<int>>> &pAncs)
-{
-    for (int i = begin; i < end; i++)
-    {
-        makeIndexDFS(pAncs[i].first, pAncs[i].second);
-    }
 }
 
 void Graph::makeIndexDFS(int p, vector<int> &ancs)
@@ -1008,14 +1410,13 @@ void Graph::makeIndexDFS(int p, vector<int> &ancs)
 
     //pos
     int pId = Tree[p].uniqueVertex;
-//    if (pId == 1964)
-//        cout << 1;
+
     intermediateLBsIn[pId] = {{pId, {}}};
     for (int i = 0; i < NeiNumIn; i++)
     {
-        int aid = Tree[p].vertIn[i].first;
         for (int j = 0; j < ancs.size(); j++)
         {
+            int aid = Tree[p].vertIn[i].first;
             if (aid == ancs[j])
             {
                 Tree[p].posIn[i] = j; // posIn[i] stores ancestor j of p
@@ -1038,10 +1439,10 @@ void Graph::makeIndexDFS(int p, vector<int> &ancs)
     intermediateLBsOut[pId] = {{pId, {}}};
     for (int i = 0; i < NeiNumOut; i++)
     {
-        int aid = Tree[p].vertOut[i].first;
         for (int j = 0; j < ancs.size(); j++)
         {
-            if (aid == ancs[j])
+            int aid = Tree[p].vertOut[i].first;
+            if (Tree[p].vertOut[i].first == ancs[j])
             {
                 Tree[p].posOut[i] = j;
                 Tree[p].disOut[j] = Tree[p].vertOut[i].second.first;
@@ -1084,6 +1485,8 @@ void Graph::makeIndexDFS(int p, vector<int> &ancs)
                 // y is the ancestor of x
                 disYX = Tree[rank[x]].disIn[j];
             }
+            if (disYX.vX.size() < 2)
+                continue;
             LPFunction disYPExist = Tree[p].disIn[j];
             if (intermediateLBsIn[pId].find(x) == intermediateLBsIn[pId].end())
                 intermediateLBsIn[pId].insert({x, {}});
@@ -1091,13 +1494,15 @@ void Graph::makeIndexDFS(int p, vector<int> &ancs)
             CatSupRec &catSupRec = intermediateLBsIn[pId][x][y];
             if (disYPExist.vX.size() <= 1)
             {
-                LPFunction disMin = disYX.LPFCatSupport(scXP, lBound, uBound, catSupRec, acc);
+                LPFunction disMin = disYX.LPFCatSupport(scXP, catSupRec);
+//                catSupRec.extendEnd(uBound + itvLen, itvLen);
                 Tree[p].disIn[j] = disMin;
             } else if (k != j and disYX.minY + scXP.minY <= disYPExist.maxY)
             {
-                LPFunction disTmp = disYX.LPFCatSupport(scXP, lBound, uBound, catSupRec, acc);
-                if (!disYPExist.dominate(disTmp, acc))
-                    Tree[p].disIn[j] = disYPExist.LPFMinSupByPlaneSweep(disTmp, acc);
+                LPFunction disTmp = disYX.LPFCatSupport(scXP, catSupRec);
+//                catSupRec.extendEnd(uBound + itvLen, itvLen);
+                if (!disYPExist.dominate(disTmp))
+                    Tree[p].disIn[j] = disYPExist.LPFMinSupByPlaneSweep(disTmp);
             }
         }
     }
@@ -1122,6 +1527,10 @@ void Graph::makeIndexDFS(int p, vector<int> &ancs)
             else if (k > j)
                 // x is deeper, contract earlier
                 disXY = Tree[rank[x]].disOut[j];
+
+            if (disXY.vX.size() < 2)
+                continue;
+
             LPFunction disPYExist = Tree[p].disOut[j];
             if (intermediateLBsOut[pId].find(x) == intermediateLBsOut[pId].end())
                 intermediateLBsOut[pId].insert({x, {}});
@@ -1129,13 +1538,15 @@ void Graph::makeIndexDFS(int p, vector<int> &ancs)
             CatSupRec &catSupRec = intermediateLBsOut[pId][x][y];
             if (disPYExist.vX.size() <= 1)
             {
-                LPFunction disMin = scPX.LPFCatSupport(disXY, lBound, uBound, catSupRec, acc);
+                LPFunction disMin = scPX.LPFCatSupport(disXY, catSupRec);
+//                catSupRec.extendEnd(uBound + itvLen, itvLen);
                 Tree[p].disOut[j] = disMin;
             } else if (k != j and scPX.minY + disXY.minY <= disPYExist.maxY)
             {
-                LPFunction disTmp = scPX.LPFCatSupport(disXY, lBound, uBound, catSupRec, acc);
-                if (!disPYExist.dominate(disTmp, acc))
-                    Tree[p].disOut[j] = disPYExist.LPFMinSupByPlaneSweep(disTmp, acc);
+                LPFunction disTmp = scPX.LPFCatSupport(disXY, catSupRec);
+//                catSupRec.extendEnd(uBound + itvLen, itvLen);
+                if (!disPYExist.dominate(disTmp))
+                    Tree[p].disOut[j] = disPYExist.LPFMinSupByPlaneSweep(disTmp);
             }
         }
     }
@@ -1144,7 +1555,10 @@ void Graph::makeIndexDFS(int p, vector<int> &ancs)
 int Graph::deepestAnc(vector<pair<int, pair<LPFunction, int>>> &vert)
 {
     if (vert.empty())
-        cout << "Empty vert!" << endl;
+    {
+//        cout << "Empty vert!" << endl;
+        return -1;
+    }
 
     int nearest = vert[0].first;
     for (int i = 1; i < (int) vert.size(); i++)
@@ -1165,6 +1579,7 @@ void Graph::deleteE(int u, int v)
         ER[v].erase(ER[v].find(u));
 }
 
+
 void Graph::insertE(int u, int v, LPFunction &lpf)
 {
     LPFunction lpfExist;
@@ -1174,40 +1589,1223 @@ void Graph::insertE(int u, int v, LPFunction &lpf)
     } else
     {
         lpfExist = E[u][v].first;
-        if (lpf.vX.size() > 1 and !lpfExist.dominate(lpf, acc))
+        if (lpf.vX.size() > 1 and !lpfExist.dominate(lpf))
         {
-            E[u][v] = {lpfExist.LPFMinSupByPlaneSweep(lpf, acc), 1};
+            E[u][v] = {lpfExist.LPFMinSupByPlaneSweep(lpf), 1};
         }
     }
 
     ER[v][u] = E[u][v];
 }
 
-vector<int> NodeOrderss;
 
-struct OrderCompp
-{//prior to reture the vertex with smaller order
-    int x;
+bool Graph::lpfIsSupportBy(
+        LPFunction &f1, const LPFunction &halfLPF, const vector<int> &halfLPFChangedPoses, bool isSC) const
+{
 
-    explicit OrderCompp(int _x)
+    return true;
+    // check if the change of halfLPF influences f1, halfLPFChangedPoses records the places where halfLPF is updated
+    assert(!halfLPFChangedPoses.empty());
+    if (halfLPFChangedPoses.size() == 1 and halfLPFChangedPoses[0] == -1)
     {
-        x = _x;
+        // this case is when halfLPF's old turning points do not change but it is appended with new turning points
+        return true;
     }
 
-    bool operator<(const OrderCompp &d) const
+    if (f1.ID1 == halfLPF.ID1 and f1.ID2 == halfLPF.ID2)
     {
-        if (x == d.x)
-        {//avoid the redundant
+        unordered_map<int, int> f2SupParts;
+        int w = NodeOrder[f1.ID1] < NodeOrder[f1.ID2] ? f1.ID1 : f1.ID2;
+
+        bool changed = false;
+        for (int i = 0; i < f1.vSupportPre.size(); i++)
+        {
+            if (f1.vSupportPre[i].find(w) == f1.vSupportPre[i].end())
+                continue;
+
+            for (const int &pos: f1.vSupportPre[i].at(w))
+            {
+                if (find(halfLPFChangedPoses.begin(),
+                         halfLPFChangedPoses.end(), pos) != halfLPFChangedPoses.end())
+                {
+                    int &cnt = f1.cntOfEachInt[i];
+                    cnt -= 1;
+                    if (cnt <= 0)
+                        changed = true;
+                }
+            }
+        }
+        return changed;
+    }
+
+    // u -> w -> v
+    int u = f1.ID1, w = -1, v = f1.ID2;
+    bool backHalf;
+    if (halfLPF.ID1 == u)
+    {
+        w = halfLPF.ID2;
+        backHalf = false;
+    } else
+    {
+        assert(halfLPF.ID2 == v);
+        w = halfLPF.ID1;
+        backHalf = true;
+    }
+
+    if (!f1.vSupportContains(w))
+        return false;
+
+    CatSupRec supportInfo;
+    if (isSC)
+    {
+        if (intermediateSCs[u].find(w) != intermediateSCs[u].end() and
+            intermediateSCs[u].at(w).find(v) != intermediateSCs[u].at(w).end())
+            supportInfo = intermediateSCs[u].at(w).find(v)->second;
+        else
             return false;
+    } else
+    {
+        if (NodeOrder[u] < NodeOrder[v])
+        {
+            if (intermediateLBsIn[u].find(w) != intermediateLBsIn[u].end()
+                and intermediateLBsIn[u].at(w).find(v) != intermediateLBsIn[u].at(w).end())
+                supportInfo = intermediateLBsIn[u].at(w).find(v)->second;
+            else
+                return false;
         } else
         {
-            if (x != d.x)
-                return NodeOrderss[x] < NodeOrderss[d.x];
+            if (intermediateLBsOut[u].find(w) != intermediateLBsOut[u].end()
+                and intermediateLBsOut[u].at(w).find(v) != intermediateLBsOut[u].at(w).end())
+                supportInfo = intermediateLBsOut[u].at(w).find(v)->second;
+            else
+                return false;
         }
     }
-};
+    if (supportInfo.vX1.empty())
+        return false;
 
-void Graph::H2HDecBatDiGraph(vector<pair<int, int>> &wBatch, int timeWinId, int timeWinLen)
+    // map changed parts of halfLPF to intermediateSCs[w][u][v]
+    vector<int> cctLPFvX;
+    if (backHalf)
+        cctLPFvX = supportInfo.vX2;
+    else
+        cctLPFvX = supportInfo.vX1;
+
+    unordered_set<int> changedPosInConcatLPF;
+    int itv = 0;
+//    assert(!cctLPFvX.empty() and halfLPF.vX.front() <= cctLPFvX.front());
+    for (const auto &changedPosInHalfLPF: halfLPFChangedPoses)
+    {
+        // changedPosInConcatLPF is the changed part of intermediate[w][u][v] (i.e., suppInfo.first)
+        int t1 = halfLPF.vX[changedPosInHalfLPF], t2 = halfLPF.vX[changedPosInHalfLPF + 1];
+        while (itv + 1 < cctLPFvX.size() and cctLPFvX[itv + 1] < t1)
+            itv++;
+
+        while (itv < cctLPFvX.size() and cctLPFvX[itv] < t2)
+        {
+            changedPosInConcatLPF.insert(itv);
+            itv++;
+        }
+    }
+
+    bool changed = false;
+    for (int i = 0; i < f1.vSupportPre.size(); i++)
+    {
+        if (f1.vSupportPre[i].find(w) == f1.vSupportPre[i].end())
+            continue;
+        for (const int &pos: f1.vSupportPre[i].at(w))
+        {
+            // cctLPF[pos] supports f1[i]
+            if (changedPosInConcatLPF.find(pos) != changedPosInConcatLPF.end())
+            {
+                int &cnt = f1.cntOfEachInt[i];
+                cnt -= 1;
+                if (cnt <= 0)
+                    changed = true;
+            }
+        }
+    }
+    return changed;
+}
+
+void Graph::H2HIncBatDiGraph(vector<pair<int, int>> &wBatch, int updX)
+{
+    cout << "Index maintenance for " << wBatch.size() << " updates at " << updX << endl;
+    unordered_map<pair<int, int>, LPFunction, boost::hash<pair<int, int>>> OCdisOld;
+
+    // NodeOrderss.clear();
+    NodeOrderss.assign(NodeOrder.begin(), NodeOrder.end());
+    vector<set<int>> SCreIn, SCreOut; //SCre.clear();
+    set<int> ss; //ss.clear();
+    SCreIn.assign(nodeNum, ss), SCreOut.assign(nodeNum, ss); //{vertexID, set<int>}
+    set<OrderCompp> OC;
+    OC.clear();//vertexID in decreasing Node order
+
+    int debugID1 = 1, debugID2 = 1;
+    std::random_device rd; // obtain a random number from hardware
+    std::mt19937 gen(rd()); // seed the generator
+    std::uniform_int_distribution<> distr(1, 10);
+
+    for (const auto &k: wBatch)
+    {
+        int a = k.first;
+        int b = k.second;
+        if (a == debugID1 and b == debugID2)
+            cout << 1;
+        int lId = NodeOrder[a] < NodeOrder[b] ? a : b;
+
+        int newW, oldW, pos;
+        bool outOfBound = true;
+        for (const auto &i: adjEdge[a])
+        {
+            if (i.first == b)
+            {
+                LPFunction &lpf = vEdge[i.second].lpf;
+
+                outOfBound = false;
+                oldW = lpf.getY(updX);
+//                if (distr(gen) <= 7)
+//                {
+//                    updX = lpf.vX.back();
+//                    oldW = lpf.vY.back();
+//                } else
+//                {
+//                    updX = lpf.vX.back() - deltaT;
+//                    oldW = lpf.getY(updX);
+//                }
+
+                if (distr(gen) < 5)
+                    newW = oldW + 10;
+                else
+                    newW = ceil(oldW * 0.7);
+
+                vector<int>::const_iterator low;
+                low = lower_bound(lpf.vX.begin(), lpf.vX.end(), updX);
+                pos = (int) (low - lpf.vX.begin());
+
+                if (lpf.vX[pos] == updX)
+                {
+                    lpf.vY[pos] = newW;
+                } else if (lpf.vX[pos] > updX)
+                {
+                    lpf.vX.insert(low, updX);
+                    lpf.vY.insert(lpf.vY.begin() + pos, newW);
+                    assert(lpf.vX[pos] == updX);
+                }
+
+                vector<int> newX = lpf.vX, newY = lpf.vY;
+                lpf.setValue(newX, newY, -1);
+                for (int j = 0; j < lpf.vX.size() - 1; j++)
+                {
+                    lpf.vSupportPre.push_back({{lId, {j}}});
+                }
+
+//                low = lower_bound(lpf.vX.begin(), lpf.vX.end(), vX);
+//                pos = (int) (low - lpf.vX.begin());
+//                lpf.lastItvSubToChange = pos > 0 ? pos - 1 : 0;
+
+                CatSupRec catSupRec;
+                catSupRec.vX1 = lpf.vX;
+                catSupRec.vX2 = lpf.vX;
+                catSupRec.vY = lpf.vY;
+
+                intermediateSCs[a][a][b] = catSupRec;
+                break;
+            }
+        }
+
+        if (outOfBound)
+            continue;
+
+        if (lId == a)
+        {
+            for (const auto &j: Tree[rank[a]].vertOut)
+            {
+                if (j.first == b and j.second.first.vSupportContains(a))
+                {
+                    OCdisOld[{a, b}] = j.second.first;
+                    SCreOut[a].insert(b);
+                    OC.insert(OrderCompp(a));
+                    break;
+                }
+            }
+        } else
+        {
+            for (const auto &j: Tree[rank[b]].vertIn)
+            {
+                if (j.first == a and j.second.first.vSupportContains(b))
+                {
+                    OCdisOld[{a, b}] = j.second.first;
+                    SCreIn[b].insert(a);
+                    OC.insert(OrderCompp(b));
+                    break;
+                }
+            }
+        }
+    }
+    cout << "** finish sc refresh" << endl;
+
+    vector<int> ProBeginVertexSet;
+    vector<int> ProBeginVertexSetNew;
+    int ProID;
+    bool influence;
+
+    while (!OC.empty())
+    {
+        ProID = (*OC.begin()).x;
+        if (ProID == -1)
+            cout << 1;
+
+        OC.erase(OC.begin());
+        influence = false;
+
+//        cout << "ProID: " << ProID << " " << Tree[rank[ProID]].disIn.size() << endl;
+        for (const auto &Cid: SCreIn[ProID])
+        {
+            if (Cid == debugID1 and ProID == debugID2)
+                cout << 1;
+            int CidH = Tree[rank[Cid]].height - 1;
+            /* check if sc(cid,pid) is really influenced, if so, update it with the new function */
+            LPFunction scCPNew;
+            for (const auto &i: adjEdge[Cid])
+            {
+                if (i.first == ProID)
+                {
+                    scCPNew = vEdge[i.second].lpf;
+                    break;
+                }
+            }
+
+            for (auto &vs: SCconNodesMT[Cid][ProID])
+            {
+                LPFunction CidToVS, vsToProId;
+                for (const auto &i: Tree[rank[vs]].vertIn)
+                {
+                    if (i.first == Cid)
+                    {
+                        CidToVS = i.second.first;
+                        break;
+                    }
+                }
+                for (const auto &i: Tree[rank[vs]].vertOut)
+                {
+                    if (i.first == ProID)
+                    {
+                        vsToProId = i.second.first;
+                        break;
+                    }
+                }
+
+                LPFunction CPTmp;
+                bool empty = scCPNew.vX.size() <= 1;
+                CatSupRec &catSupRec = intermediateSCs[Cid][vs][ProID];
+                if (empty)
+                {
+                    CPTmp = CidToVS.LPFCatSupport(vsToProId, catSupRec);
+                    scCPNew = CPTmp;
+                } else if (CidToVS.minY + vsToProId.minY <= scCPNew.maxY)
+                {
+                    CPTmp = CidToVS.LPFCatSupport(vsToProId, catSupRec);
+                }
+
+                if (!empty and CPTmp.vX.size() > 1 and !scCPNew.dominate(CPTmp))
+                {
+                    scCPNew = scCPNew.LPFMinSupByPlaneSweep(CPTmp);
+                }
+            }
+
+            LPFunction scCPOld = OCdisOld[{Cid, ProID}];
+
+            vector<int> changedPos;
+            if (scCPOld.equal(scCPNew, changedPos))
+                continue;
+
+            for (auto &j: Tree[rank[ProID]].vertIn)
+            {
+                if (j.first == Cid)
+                {
+                    assert(scCPNew.ID1 == Cid and scCPNew.ID2 == ProID);
+                    j.second = {scCPNew, 1};
+                    break;
+                }
+            }
+
+            // HneiOut: <accessories contract after Cid, lpf from ProId to hid
+            unordered_set<int> HneiOut;
+            // LneiOut: accessories contract after ProId and before Cid, lpf from ProId to lid
+            vector<int> LneiOut;
+            for (auto &j: Tree[rank[ProID]].vertOut)
+            {
+                // j.first is the accessory of ProID
+                if (NodeOrder[j.first] > NodeOrder[Cid])
+                    HneiOut.insert(j.first);
+                else if (NodeOrder[j.first] < NodeOrder[Cid])
+                    LneiOut.emplace_back(j.first);
+            }
+
+            // in theory, scCPOld should dominate scCPNew, but due to rounding, domination may not hold
+            bool newSCDec = !scCPOld.dominate(scCPNew); // assert(newSCDec == false);
+
+            for (auto &i: Tree[rank[Cid]].vertOut)
+            {
+                int hid = i.first;
+                if (HneiOut.find(hid) != HneiOut.end())
+                {
+                    bool changed =
+                            newSCDec or i.second.second <= 0 or
+                            lpfIsSupportBy(i.second.first, scCPOld, changedPos, true);
+                    if (i.second.second > 0 and changed)
+                    {
+                        OCdisOld[{Cid, hid}] = i.second.first;
+                        SCreOut[Cid].insert(hid);
+                        OC.insert(OrderCompp(Cid));
+                        i.second.second = 0;
+                    }
+                }
+            }
+
+            for (auto &i: LneiOut)
+            {
+                int lid = i;
+                for (auto &j: Tree[rank[lid]].vertIn)
+                {
+                    if (j.first == Cid)
+                    {
+                        bool changed =
+                                newSCDec or j.second.second <= 0 or
+                                lpfIsSupportBy(j.second.first, scCPOld, changedPos, true);
+                        if (j.second.second > 0 and changed)
+                        {
+                            OCdisOld[{Cid, lid}] = j.second.first;
+                            SCreIn[lid].insert(Cid);
+                            OC.insert(OrderCompp(lid));
+                            j.second.second = 0;
+                        }
+                        break;
+                    }
+                }
+            }
+
+            int pAncs = (int) Tree[rank[ProID]].ancIDs.size();
+            for (int i = 0; i < pAncs; i++)
+            {
+                // i -> cid -> pid
+                LPFunction &disIP = Tree[rank[ProID]].disIn[i];
+                if (newSCDec)
+                {
+                    if (i == CidH)
+                        influence = true;
+                    Tree[rank[ProID]].cntIn[i] = 0;
+                } else if (lpfIsSupportBy(disIP, scCPOld, changedPos, false))
+                {
+                    Tree[rank[ProID]].cntIn[i] = 0;
+                    if (i == CidH)
+                        influence = true;
+                }
+            }
+
+//            scCPNew.scSupToLbSup(ProID);
+            CatSupRec catSupRec;
+            catSupRec.vX1 = scCPNew.vX;
+            catSupRec.vX2 = scCPNew.vX;
+            catSupRec.vY = scCPNew.vY;
+            intermediateLBsIn[ProID][ProID][Cid] = catSupRec;
+        }
+
+        for (const auto &Cid: SCreOut[ProID])
+        {
+            if (Cid == debugID2 and ProID == debugID1)
+                cout << 1;
+            int CidH = Tree[rank[Cid]].height - 1;
+
+            /* check if sc(pid,cid) is really influenced, if so, update it with the new function */
+            LPFunction scPCNew;
+            for (const auto &i: adjEdge[ProID])
+            {
+                if (i.first == Cid)
+                {
+                    scPCNew = vEdge[i.second].lpf;
+                    break;
+                }
+            }
+
+            for (auto &vs: SCconNodesMT[ProID][Cid])
+            {
+                LPFunction ProidToVS, vsToCid;
+                for (const auto &i: Tree[rank[vs]].vertIn)
+                {
+                    if (i.first == ProID)
+                    {
+                        ProidToVS = i.second.first;
+                        break;
+                    }
+                }
+
+                for (const auto &i: Tree[rank[vs]].vertOut)
+                {
+                    if (i.first == Cid)
+                    {
+                        vsToCid = i.second.first;
+                        break;
+                    }
+                }
+
+                assert(ProidToVS.ID1 == ProID and vsToCid.ID2 == Cid);
+                LPFunction PCTmp;
+                bool empty = scPCNew.vX.size() <= 1;
+                CatSupRec &catSupRec = intermediateSCs[ProID][vs][Cid];
+                if (empty)
+                {
+                    PCTmp = ProidToVS.LPFCatSupport(vsToCid, catSupRec);
+                    scPCNew = PCTmp;
+                } else if (ProidToVS.minY + vsToCid.minY <= scPCNew.maxY)
+                {
+                    PCTmp = ProidToVS.LPFCatSupport(vsToCid, catSupRec);
+                }
+
+                if (!empty and PCTmp.vX.size() > 1 and !scPCNew.dominate(PCTmp))
+                {
+                    scPCNew = scPCNew.LPFMinSupByPlaneSweep(PCTmp);
+                }
+            }
+
+            LPFunction scPCOld = OCdisOld[{ProID, Cid}];
+            vector<int> changedPos;
+            if (scPCOld.equal(scPCNew, changedPos))
+                continue;
+            for (auto &j: Tree[rank[ProID]].vertOut)
+            {
+                if (j.first == Cid)
+                {
+                    assert(scPCNew.ID1 == ProID and scPCNew.ID2 == Cid);
+                    j.second = {scPCNew, 1};
+                    break;
+                }
+            }
+
+            unordered_set<int> HneiIn;
+            vector<int> LneiIn;
+            for (auto &i: Tree[rank[ProID]].vertIn)
+            {
+                // j.first is the accessory of ProID
+                if (NodeOrder[i.first] > NodeOrder[Cid])
+                    HneiIn.insert(i.first);
+                else if (NodeOrder[i.first] < NodeOrder[Cid])
+                    LneiIn.emplace_back(i.first);
+            }
+
+            // in theory, scCPOld should dominate scCPNew, but due to rounding, domination may not hold
+            bool newSCDec = !scPCOld.dominate(scPCNew); // assert(newSCDec == false);
+
+            for (auto &i: Tree[rank[Cid]].vertIn)
+            {
+                int hid = i.first;
+                if (HneiIn.find(hid) != HneiIn.end())
+                {
+                    bool changed =
+                            newSCDec or i.second.second <= 0 or
+                            lpfIsSupportBy(i.second.first, scPCOld, changedPos, true);
+                    if (i.second.second > 0 and changed)
+                    {
+                        OCdisOld[{hid, Cid}] = i.second.first;
+                        SCreIn[Cid].insert(hid);
+                        OC.insert(OrderCompp(Cid));
+                        i.second.second = 0;
+                    }
+                }
+            }
+
+            for (auto &lid: LneiIn)
+            {
+                for (auto &i: Tree[rank[lid]].vertOut)
+                {
+                    if (i.first == Cid)
+                    {
+                        bool changed =
+                                newSCDec or i.second.second <= 0 or
+                                lpfIsSupportBy(i.second.first, scPCOld, changedPos, true);
+                        if (i.second.second > 0 and changed)
+                        {
+                            OCdisOld[{lid, Cid}] = i.second.first;
+                            SCreOut[lid].insert(Cid);
+                            OC.insert(OrderCompp(lid));
+                            i.second.second = 0;
+                        }
+                        break;
+                    }
+                }
+            }
+
+            influence = true;
+            int pAncs = (int) Tree[rank[ProID]].ancIDs.size();
+            for (int i = 0; i < pAncs; i++)
+            {
+                LPFunction &disPI = Tree[rank[ProID]].disOut[i], disCI;
+                if (newSCDec)
+                {
+                    if (i == CidH)
+                        influence = true;
+                    Tree[rank[ProID]].cntOut[i] = 0;
+                } else if (lpfIsSupportBy(disPI, scPCOld, changedPos, false))
+                {
+                    Tree[rank[ProID]].cntOut[i] = 0;
+                    if (i == CidH)
+                        influence = true;
+                }
+            }
+
+//            scPCNew.scSupToLbSup(ProID);
+            CatSupRec catSupRec;
+            catSupRec.vX1 = scPCNew.vX;
+            catSupRec.vX2 = scPCNew.vX;
+            catSupRec.vY = scPCNew.vY;
+            intermediateLBsOut[ProID][ProID][Cid] = catSupRec;
+        }
+
+        if (influence)
+        {
+            ProBeginVertexSetNew.clear();
+            ProBeginVertexSetNew.reserve(ProBeginVertexSet.size() + 1);
+            ProBeginVertexSetNew.push_back(ProID);
+            int rnew = rank[ProID], r;
+            for (int i: ProBeginVertexSet)
+            {
+                r = rank[i];
+                if (LCAQuery(rnew, r) != rnew)
+                {
+                    ProBeginVertexSetNew.push_back(i);
+                }
+            }
+            ProBeginVertexSet = ProBeginVertexSetNew;
+        }
+    }
+
+//    cout << "** finish bottom-up refresh" << endl;
+
+    Timer clock;
+    clock.tick();
+    EachNodeIncMainThread(ProBeginVertexSet);
+    clock.tock();
+//    cout << "** time for top-down refresh: " << clock.duration().count() << " seconds" << endl;
+
+//    cout << "** finish top-down refresh" << endl;
+}
+
+void Graph::EachNodeIncMainThread(const vector<int> &sources)
+{
+    vector<int> uRanks;
+    uRanks.reserve(sources.size());
+    for (int ProBeginVertexID: sources)
+    {
+        uRanks.push_back(rank[ProBeginVertexID]);
+    }
+
+    Timer clock;
+    clock.tick();
+    while (!uRanks.empty() and uRanks.size() < 100)
+    {
+        boost::thread_group threads;
+        for (const auto &u: uRanks)
+        {
+            threads.create_thread(boost::bind(&Graph::EachNodeIncMain, this, u));
+        }
+        threads.join_all();
+
+        vector<int> newURanks;
+        for (const auto &ur: uRanks)
+        {
+            for (int j: Tree[ur].vChildren)
+            {
+                newURanks.push_back(j);
+            }
+        }
+        uRanks = newURanks;
+    }
+    clock.tock();
+//    cout << "** time for top-down refresh 1: " << clock.duration().count() << " ms" << endl;
+
+    clock.tick();
+    boost::thread_group threads;
+    for (const auto &ur: uRanks)
+    {
+        threads.create_thread(boost::bind(&Graph::EachNodeIncMainRec, this, ur));
+    }
+    threads.join_all();
+    clock.tock();
+//    cout << "** time for top-down refresh 2: " << clock.duration().count() << " ms" << endl;
+}
+
+void Graph::EachNodeIncMainRec(int uRank)
+{
+    EachNodeIncMain(uRank);
+    for (int j: Tree[uRank].vChildren)
+        EachNodeIncMainRec(j);
+}
+
+void Graph::EachNodeIncMain(int uRank)
+{
+    int u = Tree[uRank].uniqueVertex;
+    int uH = Tree[uRank].height - 1;
+
+    vector<int> line = Tree[uRank].ancIDs;
+
+    for (int aH = 0; aH < line.size(); aH++)
+    {
+        int a = line[aH];
+        LPFunction disAUOld = Tree[uRank].disIn[aH];
+
+//        if (Tree[uRank].cntIn[aH] > 0) continue;
+        //firstly, calculate the actual distance
+        int b, bH;
+        LPFunction disAUMin, scBU;
+        for (int j = 0; j < Tree[uRank].vertIn.size(); j++)
+        {
+            // a -> b -> u
+            b = Tree[uRank].vertIn[j].first;
+            scBU = Tree[uRank].vertIn[j].second.first;
+            scBU.scSupToLbSup(u);
+            bH = Tree[rank[b]].height - 1;
+            bool empty = disAUMin.vX.size() < 2;
+            LPFunction disAUTmp;
+            CatSupRec &catSupRec = intermediateLBsIn[u][b][a];
+            if (bH < aH)
+            {
+                LPFunction disAB = Tree[rank[a]].disOut[bH];
+                if (empty)
+                {
+                    disAUTmp = disAB.LPFCatSupport(scBU, catSupRec);
+                    disAUMin = disAUTmp;
+                } else if (disAB.minY + scBU.minY <= disAUMin.maxY)
+                {
+                    disAUTmp = disAB.LPFCatSupport(scBU, catSupRec);
+                }
+            } else if (bH == aH)
+            {
+                // b == a
+                if (empty)
+                {
+                    disAUTmp = scBU;
+                    disAUMin = disAUTmp;
+                } else if (scBU.minY <= disAUMin.maxY or scBU.vX.back() > disAUMin.vX.back())
+                    disAUTmp = scBU;
+            } else
+            {
+                LPFunction disAB = Tree[rank[b]].disIn[aH];
+                if (empty)
+                {
+                    disAUTmp = disAB.LPFCatSupport(scBU, catSupRec);
+                    disAUMin = disAUTmp;
+                } else if (disAB.minY + scBU.minY <= disAUMin.maxY)
+                {
+                    disAUTmp = disAB.LPFCatSupport(scBU, catSupRec);
+                }
+            }
+
+            if (disAUTmp.vX.size() > 1 and u == 1 and a == 1)
+            {
+                cout << "~~~~~~~~~~~~~~~~~~~" << endl;
+                disAUMin.display();
+                disAUTmp.display();
+            }
+            if (!empty and disAUTmp.vX.size() > 1 and !disAUMin.dominate(disAUTmp))
+            {
+                disAUMin = disAUMin.LPFMinSupByPlaneSweep(disAUTmp);
+            }
+            assert(disAUMin.ID1 == a and disAUMin.ID2 == u);
+        }
+
+        vector<int> changedPos;
+        bool updated = disAUMin.vX.size() > 1 and !disAUOld.equal(disAUMin, changedPos);
+        if (!updated)
+            continue;
+
+        Tree[uRank].disIn[aH] = disAUMin;
+        Tree[uRank].cntIn[aH] = 1;
+
+        bool newLabDec = !disAUOld.dominate(disAUMin);
+        // firstly, check which dis can be infected
+        for (int vRank: VidtoTNid[u])
+        {
+            // lb(a, u) + sc(u, v)
+            int &cnt = Tree[vRank].cntIn[aH];
+            if (cnt == 0)
+                continue;
+            LPFunction &disAV = Tree[vRank].disIn[aH];
+            bool changed = newLabDec or lpfIsSupportBy(disAV, disAUOld, changedPos, false);
+            if (changed)
+                cnt = 0;
+        }
+
+        for (int vRank: VidtoTNid[a])
+        {
+            // sc(v, a) + lb(a, u)
+            if (Tree[vRank].height <= Tree[uRank].height or Tree[vRank].ancIDs[uH] != u)
+                continue;
+            int &cnt = Tree[vRank].cntOut[uH];
+            if (cnt == 0)
+                continue;
+            LPFunction &disVU = Tree[vRank].disOut[uH];
+            bool changed = newLabDec or lpfIsSupportBy(disVU, disAUOld, changedPos, false);
+            if (changed)
+                cnt = 0;
+        }
+    }
+
+    for (int aH = 0; aH < line.size(); aH++)
+    {
+        int a = line[aH];
+        LPFunction disUAOld = Tree[uRank].disOut[aH];
+
+//        if (Tree[uRank].cntOut[aH] > 0) continue;
+        //firstly, calculate the actual distance
+        int b, bH;
+
+        LPFunction disUAMin, scUB, scUA;
+        for (int j = 0; j < Tree[uRank].vertOut.size(); j++)
+        {
+            // a <- b <- u
+            b = Tree[uRank].vertOut[j].first;
+            scUB = Tree[uRank].vertOut[j].second.first;
+            scUB.scSupToLbSup(u);
+            bH = Tree[rank[b]].height - 1;
+            bool empty = disUAMin.vX.size() < 2;
+            LPFunction disUATmp;
+            CatSupRec &catSupRec = intermediateLBsOut[u][b][a];
+            if (bH < aH)
+            {
+                LPFunction disBA = Tree[rank[a]].disIn[bH];
+                if (empty)
+                {
+                    disUATmp = scUB.LPFCatSupport(disBA, catSupRec);
+                    disUAMin = disUATmp;
+                } else
+                {
+                    int last = scUB.LPFGetX(disBA.vX.back());
+                    if (last > disUAMin.vX.back() or disBA.minY + scUB.minY <= disUAMin.maxY)
+                    {
+                        disUATmp = scUB.LPFCatSupport(disBA, catSupRec);
+                    }
+                }
+
+            } else if (bH == aH)
+            {
+                // b == a
+                scUA = scUB;
+                if (empty)
+                {
+                    disUATmp = scUB;
+                    disUAMin = disUATmp;
+                } else if (scUB.minY <= disUAMin.maxY or scUB.vX.back() > disUAMin.vX.back())
+                {
+                    disUATmp = scUB;
+                }
+            } else
+            {
+                LPFunction disBA = Tree[rank[b]].disOut[aH];
+                if (empty)
+                {
+                    disUATmp = scUB.LPFCatSupport(disBA, catSupRec);
+                    disUAMin = disUATmp;
+                } else if (disBA.minY + scUB.minY <= disUAMin.maxY)
+                {
+                    disUATmp = scUB.LPFCatSupport(disBA, catSupRec);
+                }
+            }
+
+            if (disUATmp.vX.size() > 1 and !disUAMin.dominate(disUATmp))
+            {
+                disUAMin = disUAMin.LPFMinSupByPlaneSweep(disUATmp);
+            }
+            assert(disUAMin.ID1 == u and disUAMin.ID2 == a);
+        }
+
+        vector<int> changedPos;
+        bool updated = disUAMin.vX.size() > 1 and !disUAOld.equal(disUAMin, changedPos);
+
+        if (!updated)
+            continue;
+
+        Tree[uRank].disOut[aH] = disUAMin;
+        Tree[uRank].cntOut[aH] = 1;
+
+        bool newLabDec = !disUAOld.dominate(disUAMin);
+        // secondly, check which dis can be infected
+        for (int vRank: VidtoTNid[u])
+        {
+            // sc(v,u) + lb(u,a)
+            int &cnt = Tree[vRank].cntOut[aH];
+            if (cnt == 0)
+                continue;
+            LPFunction &disVA = Tree[vRank].disOut[aH];
+            bool changed = newLabDec or lpfIsSupportBy(disVA, disUAOld, changedPos, false);
+            if (changed)
+                cnt = 0;
+        }
+
+        for (int vRank: VidtoTNid[a])
+        {
+            // lb(u,a) + sc(a,v)
+            if (Tree[vRank].height <= Tree[uRank].height or Tree[vRank].ancIDs[uH] != u)
+                continue;
+
+            int &cnt = Tree[vRank].cntIn[uH];
+            if (cnt == 0)
+                continue;
+            LPFunction &disUV = Tree[vRank].disIn[uH];
+            bool changed = newLabDec or lpfIsSupportBy(disUV, disUAOld, changedPos, false);
+            if (changed)
+                cnt = 0;
+        }
+    }
+}
+
+
+vector<TreeNode> Graph::precomputeSCForA()
+{
+    int debugID1 = 0, debugID2 = 0;
+    vector<TreeNode> TreePreA(nodeNum);
+    for (int i = 0; i < nodeNum; i++)
+    {
+        // copy the tree structure
+        for (const auto &j: Tree[i].vertIn)
+            TreePreA[i].vertIn.push_back({j.first, {LPFunction(), 1}});
+        for (const auto &j: Tree[i].vertOut)
+            TreePreA[i].vertOut.push_back({j.first, {LPFunction(), 1}});
+        TreePreA[i].disIn.assign(Tree[i].disIn.size(), LPFunction());
+        TreePreA[i].disOut.assign(Tree[i].disOut.size(), LPFunction());
+        TreePreA[i].ancIDs = Tree[i].ancIDs;
+        TreePreA[i].height = Tree[i].height;
+        TreePreA[i].posIn = Tree[i].posIn;
+        TreePreA[i].posOut = Tree[i].posOut;
+        TreePreA[i].uniqueVertex = Tree[i].uniqueVertex;
+    }
+
+    for (auto &x: vNodeOrder)
+    {
+
+        for (auto &i: Tree[rank[x]].vertIn)
+        {
+            for (auto &j: Tree[rank[x]].vertOut)
+            {
+                int ID1 = i.first;
+                int ID2 = j.first;
+                if (ID1 == ID2)
+                    continue;
+
+
+                if (ID1 == debugID1 and ID2 == debugID2)
+                {
+                    cout << "x:" << x << endl;
+                    i.second.first.display();
+                    j.second.first.display();
+                }
+
+                if (j.second.first.vX.size() <= 1)
+                    continue;
+
+                LPFunction scID1ID2Exist, scID1ID2PreComp;
+                int k;
+                if (NodeOrder[ID1] < NodeOrder[ID2])
+                {
+                    for (k = 0; k < Tree[rank[ID1]].vertOut.size(); k++)
+                    {
+                        if (TreePreA[rank[ID1]].vertOut[k].first == ID2)
+                        {
+                            scID1ID2Exist = Tree[rank[ID1]].vertOut[k].second.first;
+                            break;
+                        }
+                    }
+                    scID1ID2PreComp = TreePreA[rank[ID1]].vertOut[k].second.first;
+                } else
+                {
+                    for (k = 0; k < Tree[rank[ID2]].vertIn.size(); k++)
+                    {
+                        if (TreePreA[rank[ID2]].vertIn[k].first == ID1)
+                        {
+                            scID1ID2Exist = Tree[rank[ID2]].vertIn[k].second.first;
+                            break;
+                        }
+                    }
+                    scID1ID2PreComp = TreePreA[rank[ID2]].vertIn[k].second.first;
+                }
+
+                assert(scID1ID2Exist.vX.size() > 1);
+
+                CatSupRec catSupRec;
+                LPFunction lpfTmp = i.second.first.LPFCatSupport(
+                        j.second.first, catSupRec, scID1ID2Exist.vX.back());
+
+                if (!scID1ID2PreComp.dominate(lpfTmp))
+                {
+                    scID1ID2PreComp = scID1ID2PreComp.LPFMinSupByPlaneSweep(lpfTmp);
+                    if (NodeOrder[ID1] < NodeOrder[ID2])
+                    {
+                        TreePreA[rank[ID1]].vertOut[k].second = {scID1ID2PreComp, 1};
+                    } else
+                    {
+                        TreePreA[rank[ID2]].vertIn[k].second = {scID1ID2PreComp, 1};
+                    }
+                }
+            }
+        }
+
+        for (int k = 0; k < Tree[rank[x]].vertIn.size(); k++)
+        {
+            LPFunction &scExist = Tree[rank[x]].vertIn[k].second.first;
+            LPFunction scExtend = TreePreA[rank[x]].vertIn[k].second.first;
+            if (scExtend.vX.size() <= 1)
+                continue;
+            scExist.vX.insert(scExist.vX.end(), scExtend.vX.begin() + 1, scExtend.vX.end());
+            scExist.vY.insert(scExist.vY.end(), scExtend.vY.begin() + 1, scExtend.vY.end());
+            scExist.vSupportPre.insert(scExist.vSupportPre.end(), scExtend.vSupportPre.begin(), scExtend.vSupportPre.end());
+            scExist.cntOfEachInt.insert(scExist.cntOfEachInt.end(), scExtend.cntOfEachInt.begin(), scExtend.cntOfEachInt.end());
+        }
+    }
+
+    cout << "** finish sc precomputation" << endl;
+
+    return TreePreA;
+}
+
+void Graph::makeIndexForA(vector<TreeNode> &TreeForA)
+{
+    Timer clock;
+    clock.tick();
+    makeIndexDFSThreadForA(TreeForA);
+    clock.tock();
+//    cout << "** making index " << clock.duration().count() << " ms" << endl;
+}
+
+void Graph::makeIndexDFSThreadForA(vector<TreeNode> &TreeForA)
+{
+    // ancs has the same size as the number of ancestors of p (i.e. the height of p)
+    //initialize
+    vector<pair<int, vector<int>>> S;
+    for (int i: Tree[0].vChildren)
+        S.push_back({i, {Tree[0].uniqueVertex}});
+
+    while (!S.empty() and S.size() < 100)
+    {
+        boost::thread_group threads;
+        for (auto &i: S)
+        {
+            threads.add_thread(
+                    new boost::thread(&Graph::makeIndexDFSForA,
+                                      this, boost::ref(TreeForA), i.first, boost::ref(i.second)
+                    ));
+        }
+        threads.join_all();
+        vector<pair<int, vector<int>>> S2;
+        S2.reserve(S.size() * 6);
+        for (const auto &p: S)
+        {
+            vector<int> ancs = p.second;
+            ancs.emplace_back(Tree[p.first].uniqueVertex);
+            for (int i: Tree[p.first].vChildren)
+            {
+                S2.emplace_back(i, ancs);
+            }
+        }
+        S = S2;
+    }
+
+//    cout << "thread num: " << S.size() << endl;
+    boost::thread_group threads;
+    for (auto &i: S)
+    {
+        threads.add_thread(
+                new boost::thread(&Graph::makeIndexDFSRecForA, this,
+                                  boost::ref(TreeForA), i.first, boost::ref(i.second)
+                ));
+    }
+    threads.join_all();
+}
+
+void Graph::makeIndexDFSRecForA(vector<TreeNode> &TreeForA, int p, vector<int> &ancs)
+{
+    makeIndexDFSForA(TreeForA, p, ancs);
+    ancs.emplace_back(Tree[p].uniqueVertex);
+    for (int i: Tree[p].vChildren)
+    {
+        makeIndexDFSRecForA(TreeForA, i, ancs);
+    }
+    ancs.pop_back();
+}
+
+void Graph::makeIndexDFSForA(vector<TreeNode> &TreeForA, int p, vector<int> &ancs)
+{
+    // ancs has the same size as the number of ancestors of p (i.e. the height of p)
+    //initialize
+    int NeiNumIn = Tree[p].vertIn.size(); // vectIn.size() == vectOut.size()
+    int NeiNumOut = Tree[p].vertOut.size(); // vectIn.size() == vectOut.size()
+//    if (p % 1000 == 0)
+//    cout << "p: " << p << " height: " << ancs.size() << " " << NeiNumIn << endl;
+    if (NeiNumIn == 0 and NeiNumOut == 0)
+        return;
+
+    //pos
+    int pId = Tree[p].uniqueVertex;
+
+    for (int i = 0; i < NeiNumIn; i++)
+    {
+        for (int j = 0; j < ancs.size(); j++)
+        {
+            int aid = TreeForA[p].vertIn[i].first;
+            if (aid == ancs[j])
+            {
+                int startT = Tree[p].disIn[j].vX.back();
+                // truncate the LPF at startT;
+                TreeForA[p].disIn[j] = Tree[p].vertIn[i].second.first.LPFTruncate(startT);
+                TreeForA[p].disIn[j].scSupToLbSup(pId);
+                break;
+            }
+        }
+    }
+
+    for (int i = 0; i < NeiNumOut; i++)
+    {
+        for (int j = 0; j < ancs.size(); j++)
+        {
+            int aid = TreeForA[p].vertOut[i].first;
+            if (Tree[p].vertOut[i].first == ancs[j])
+            {
+                int startT = Tree[p].disOut[j].vX.back();
+                // truncate the LPF at startT;
+                TreeForA[p].disOut[j] = Tree[p].vertOut[i].second.first.LPFTruncate(startT);
+                TreeForA[p].disOut[j].scSupToLbSup(pId);
+
+                break;
+            }
+        }
+    }
+
+    /* in-labels */
+    for (int i = 0; i < NeiNumIn; i++)
+    {
+        if (Tree[p].vertIn[i].second.first.vX.size() < 2)
+            continue;
+        int x = Tree[p].vertIn[i].first;
+        LPFunction scXP = Tree[p].vertIn[i].second.first; // LPF from x to p
+        int k = Tree[p].posIn[i]; //the kth ancestor is x
+
+        scXP.scSupToLbSup(pId);
+        for (int j = 0; j < ancs.size(); j++)
+        {
+            // p <- x <- y
+            int y = ancs[j]; // the jth ancestor is y
+            LPFunction disYX; // LPF from y to x
+            if (k < j)
+            {
+                // x is the ancestor of y
+                disYX = Tree[rank[y]].disOut[k];
+            } else if (k > j)
+            {
+                // y is the ancestor of x
+                disYX = Tree[rank[x]].disIn[j];
+            }
+            if (disYX.vX.size() < 2)
+                continue;
+            LPFunction disYPForA = TreeForA[p].disIn[j], disYPExist = Tree[p].disIn[j];
+            CatSupRec catSupRec;
+            if (disYPForA.vX.size() <= 1)
+            {
+                LPFunction disMin = disYX.LPFCatSupport(scXP, catSupRec, disYPExist.vX.back());
+                TreeForA[p].disIn[j] = disMin;
+            } else if (k != j and disYX.minY + scXP.minY <= disYPForA.maxY)
+            {
+                LPFunction disTmp = disYX.LPFCatSupport(scXP, catSupRec, disYPExist.vX.back());
+                if (!disYPForA.dominate(disTmp))
+                    TreeForA[p].disIn[j] = disYPForA.LPFMinSupByPlaneSweep(disTmp);
+            }
+        }
+    }
+
+    for (int t = 0; t < Tree[p].disIn.size(); t++)
+    {
+        if (TreeForA[p].disIn[t].vX.size() > 1)
+        {
+            LPFunction &dist = TreeForA[p].disIn[t];
+            LPFunction disTmp = TreeForA[p].disIn[t];
+            dist.vX.insert(dist.vX.end(), disTmp.vX.begin() + 1, disTmp.vX.end());
+            dist.vY.insert(dist.vY.end(), disTmp.vY.begin() + 1, disTmp.vY.end());
+            dist.vSupportPre.insert(dist.vSupportPre.end(), disTmp.vSupportPre.begin(), disTmp.vSupportPre.end());
+            dist.cntOfEachInt.insert(dist.cntOfEachInt.end(), disTmp.cntOfEachInt.begin(), disTmp.cntOfEachInt.end());
+            dist.minY = INF;
+            dist.maxY = -INF;
+            for (const auto &c:dist.vY)
+            {
+                if (c < dist.minY)
+                    dist.minY = c;
+                if (c > dist.maxY)
+                    dist.maxY = c;
+            }
+        }
+    }
+
+    /* out-labels */
+    for (int i = 0; i < NeiNumOut; i++)
+    {
+        if (Tree[p].vertOut[i].second.first.vX.size() < 2)
+            continue;
+        int x = Tree[p].vertOut[i].first;
+        LPFunction scPX = TreeForA[p].vertOut[i].second.first; // LPF from p to x
+        int k = Tree[p].posOut[i];//the kth ancestor is x
+
+        scPX.scSupToLbSup(pId);
+        for (int j = 0; j < ancs.size(); j++)
+        {
+            int y = ancs[j]; //the jth ancestor is y
+            LPFunction disXY; // LPF from x to y
+            if (k < j)
+                // y is deeper
+                disXY = Tree[rank[y]].disIn[k];
+            else if (k > j)
+                // x is deeper, contract earlier
+                disXY = Tree[rank[x]].disOut[j];
+
+            if (disXY.vX.size() < 2)
+                continue;
+
+            LPFunction disPYForA = TreeForA[p].disOut[j], disPYExist = Tree[p].disOut[j];
+            CatSupRec catSupRec;
+            if (disPYForA.vX.size() <= 1)
+            {
+                LPFunction disMin = scPX.LPFCatSupport(disXY, catSupRec, disPYExist.vX.back());
+                TreeForA[p].disOut[j] = disMin;
+            } else if (k != j and scPX.minY + disXY.minY <= disPYExist.maxY)
+            {
+                LPFunction disTmp = scPX.LPFCatSupport(disXY, catSupRec, disPYExist.vX.back());
+                if (!disPYExist.dominate(disTmp))
+                    TreeForA[p].disOut[j] = disPYExist.LPFMinSupByPlaneSweep(disTmp);
+            }
+        }
+    }
+
+    for (int t = 0; t < Tree[p].disOut.size(); t++)
+    {
+        if (TreeForA[p].disOut[t].vX.size() > 1)
+        {
+            LPFunction &dist = TreeForA[p].disOut[t];
+            LPFunction disTmp = TreeForA[p].disOut[t];
+            dist.vX.insert(dist.vX.end(), disTmp.vX.begin() + 1, disTmp.vX.end());
+            dist.vY.insert(dist.vY.end(), disTmp.vY.begin() + 1, disTmp.vY.end());
+            dist.vSupportPre.insert(dist.vSupportPre.end(), disTmp.vSupportPre.begin(), disTmp.vSupportPre.end());
+            dist.cntOfEachInt.insert(dist.cntOfEachInt.end(), disTmp.cntOfEachInt.begin(), disTmp.cntOfEachInt.end());
+            dist.minY = INF;
+            dist.maxY = -INF;
+            for (const auto &c:dist.vY)
+            {
+                if (c < dist.minY)
+                    dist.minY = c;
+                if (c > dist.maxY)
+                    dist.maxY = c;
+            }
+        }
+    }
+}
+
+void Graph::H2HDecBatDiGraph(
+        vector<pair<pair<int, int>, pair<int, double>>> &wBatch, int timeWinId, int timeWinLen)
 {
     cout << "Index maintenance for " << wBatch.size() << " decrease updates" << endl;
     assert(!wBatch.empty());
@@ -1222,20 +2820,21 @@ void Graph::H2HDecBatDiGraph(vector<pair<int, int>> &wBatch, int timeWinId, int 
 
     // NodeOrderss.clear();
     NodeOrderss.assign(NodeOrder.begin(), NodeOrder.end());
-    vector<set<int>> SCreOut(nodeNum, set < int > ()), SCreIn(nodeNum, set < int > ()); //SCre.clear();
-    set < OrderCompp > OC; //OC.clear();//vertexID in decreasing Node order
+    vector<set<int>> SCreOut(nodeNum, set<int>()), SCreIn(nodeNum, set<int>()); //SCre.clear();
+    set<OrderCompp> OC; //OC.clear();//vertexID in decreasing Node order
 
     int debugID1 = 1, debugID2 = 1;
 
     for (const auto &k: wBatch)
     {
         int a, b, vX, newW, oldW;
-        a = k.first;
-        b = k.second;
-        vX = lBound + 7 * 300;
+        a = k.first.first;
+        b = k.first.second;
+        vX = (k.second.first + timeWinId) * timeWinLen;
 
         if (a == debugID1 and b == debugID2)
             cout << 1;
+        double frac = k.second.second;
         LPFunction newEdge;
         bool outOfBound = true;
         for (const auto &i: adjEdge[a])
@@ -1251,7 +2850,7 @@ void Graph::H2HDecBatDiGraph(vector<pair<int, int>> &wBatch, int timeWinId, int 
 
                 outOfBound = false;
                 oldW = lpf.getY(vX);
-                newW = ceil((double) oldW * 1.0 - oldW * 0.1);
+                newW = ceil(frac * oldW);
 
                 vector<int>::const_iterator low;
                 low = lower_bound(lpf.vX.begin(), lpf.vX.end(), vX);
@@ -1267,10 +2866,8 @@ void Graph::H2HDecBatDiGraph(vector<pair<int, int>> &wBatch, int timeWinId, int 
                     lpf.vY.insert(lpf.vY.begin() + pos, newW);
                 }
 
-                lpf.lastItvSubToChange = pos > 0 ? pos - 1 : 0;
-
                 vector<int> newX = lpf.vX, newY = lpf.vY;
-                lpf.setValue(newX, newY, -1, 0);
+                lpf.setValue(newX, newY);
 
                 int lid = NodeOrder[a] < NodeOrder[b] ? a : b;
                 lpf.vSupportPre.clear();
@@ -1294,9 +2891,9 @@ void Graph::H2HDecBatDiGraph(vector<pair<int, int>> &wBatch, int timeWinId, int 
                 if (Tree[rank[a]].vertOut[i].first == b)
                 {
                     LPFunction lpfExist = Tree[rank[a]].vertOut[i].second.first;
-                    if (!lpfExist.dominate(newEdge, acc))
+                    if (!lpfExist.dominate(newEdge))
                     {
-                        Tree[rank[a]].vertOut[i].second = {lpfExist.LPFMinSupForDec(newEdge, acc), 1};
+                        Tree[rank[a]].vertOut[i].second = {lpfExist.LPFMinSupForDec(newEdge), 1};
                         if (a == debugID1 and b == debugID2)
                         {
                             lpfExist.display();
@@ -1318,9 +2915,9 @@ void Graph::H2HDecBatDiGraph(vector<pair<int, int>> &wBatch, int timeWinId, int 
                 if (Tree[rank[b]].vertIn[i].first == a)
                 {
                     LPFunction lpfExist = Tree[rank[b]].vertIn[i].second.first;
-                    if (!lpfExist.dominate(newEdge, acc))
+                    if (!lpfExist.dominate(newEdge))
                     {
-                        Tree[rank[b]].vertIn[i].second = {lpfExist.LPFMinSupForDec(newEdge, acc), 1};
+                        Tree[rank[b]].vertIn[i].second = {lpfExist.LPFMinSupForDec(newEdge), 1};
                         if (a == debugID1 and b == debugID2)
                         {
                             lpfExist.display();
@@ -1382,12 +2979,12 @@ void Graph::H2HDecBatDiGraph(vector<pair<int, int>> &wBatch, int timeWinId, int 
                 CidToPidFun.display();
 //                lpfExist.LPFMinSupForDec(CidToPidFun).display();
             }
-            if (!lpfExist.dominate(CidToPidFun, acc))
+            if (!lpfExist.dominate(CidToPidFun))
             {
                 LPFunction CidToPidFun2 = CidToPidFun;
                 CidToPidFun2.scSupToLbSup(ProID);
 
-                Tree[rank[ProID]].disIn[cidH] = lpfExist.LPFMinSupForDec(CidToPidFun2, acc);
+                Tree[rank[ProID]].disIn[cidH] = lpfExist.LPFMinSupForDec(CidToPidFun2);
                 ProIDdisChaIn = true;
                 // DisRe contains the accessories whose distance labeling has changed
                 Tree[rank[ProID]].DisReIn.insert(Cid);
@@ -1403,13 +3000,12 @@ void Graph::H2HDecBatDiGraph(vector<pair<int, int>> &wBatch, int timeWinId, int 
                 {
                     // otherwise, e(hid, cid) is not supported by (a,b)
                     // how to concatenate?
-//                    CatSupRec catSupRec = intermediateLBsOut[Cid][hid][ProID];
-                    lpfTmp = CidToPidFun.LPFCatSupport(HneiOut[hid], lBound, uBound, acc);
+                    lpfTmp = CidToPidFun.LPFCatSupport(HneiOut[hid], lBound, uBound);
                     existSC = Tree[rank[Cid]].vertOut[j].second.first;
 
-                    if (!existSC.dominate(lpfTmp, acc))
+                    if (!existSC.dominate(lpfTmp))
                     {
-                        Tree[rank[Cid]].vertOut[j].second = {existSC.LPFMinSupForDec(lpfTmp, acc), 1};
+                        Tree[rank[Cid]].vertOut[j].second = {existSC.LPFMinSupForDec(lpfTmp), 1};
                         SCreOut[Cid].insert(hid);
                         OC.insert(OrderCompp(Cid));
                         scProcThisTurn.insert({Cid, hid});
@@ -1432,11 +3028,11 @@ void Graph::H2HDecBatDiGraph(vector<pair<int, int>> &wBatch, int timeWinId, int 
                 {
                     if (Tree[rank[lid]].vertIn[k].first == Cid)
                     {
-                        lpfTmp = CidToPidFun.LPFCatSupport(j.second, lBound, uBound, acc);
+                        lpfTmp = CidToPidFun.LPFCatSupport(j.second, lBound, uBound);
                         existSC = Tree[rank[lid]].vertIn[k].second.first;
-                        if (!existSC.dominate(lpfTmp, acc))
+                        if (!existSC.dominate(lpfTmp))
                         {
-                            Tree[rank[lid]].vertIn[k].second = {existSC.LPFMinSupForDec(lpfTmp, acc), 1};
+                            Tree[rank[lid]].vertIn[k].second = {existSC.LPFMinSupForDec(lpfTmp), 1};
                             SCreIn[lid].insert(Cid);
                             OC.insert(OrderCompp(lid));
                             scProcThisTurn.insert({Cid, lid});
@@ -1488,11 +3084,11 @@ void Graph::H2HDecBatDiGraph(vector<pair<int, int>> &wBatch, int timeWinId, int 
 //                lpfExist.display();
 //                PidToCidFun.display();
 //            }
-            if (!lpfExist.dominate(PidToCidFun, acc))
+            if (!lpfExist.dominate(PidToCidFun))
             {
                 LPFunction PidToCidFun2 = PidToCidFun;
                 PidToCidFun2.scSupToLbSup(ProID);
-                Tree[rank[ProID]].disOut[cidH] = lpfExist.LPFMinSupForDec(PidToCidFun2, acc);
+                Tree[rank[ProID]].disOut[cidH] = lpfExist.LPFMinSupForDec(PidToCidFun2);
                 ProIDdisChaOut = true;
                 // DisRe contains the accessories whose distance labeling has changed
                 Tree[rank[ProID]].DisReOut.insert(Cid);
@@ -1511,12 +3107,12 @@ void Graph::H2HDecBatDiGraph(vector<pair<int, int>> &wBatch, int timeWinId, int 
                 {
                     // otherwise, e(hid, cid) is not supported by (a,b)
                     // how to concatenate?
-                    lpfTmp = HneiIn[hid].LPFCatSupport(PidToCidFun, lBound, uBound, acc);
+                    lpfTmp = HneiIn[hid].LPFCatSupport(PidToCidFun, lBound, uBound);
                     existSC = Tree[rank[Cid]].vertIn[j].second.first;
 
-                    if (!existSC.dominate(lpfTmp, acc))
+                    if (!existSC.dominate(lpfTmp))
                     {
-                        Tree[rank[Cid]].vertIn[j].second = {existSC.LPFMinSupForDec(lpfTmp, acc), 1};
+                        Tree[rank[Cid]].vertIn[j].second = {existSC.LPFMinSupForDec(lpfTmp), 1};
                         SCreIn[Cid].insert(hid);
                         OC.insert(OrderCompp(Cid));
                         if (ProID == debugID1 and Cid == debugID2)
@@ -1544,10 +3140,10 @@ void Graph::H2HDecBatDiGraph(vector<pair<int, int>> &wBatch, int timeWinId, int 
                     if (Tree[rank[lid]].vertOut[k].first == Cid)
                     {
                         existSC = Tree[rank[lid]].vertOut[k].second.first;
-                        lpfTmp = j.second.LPFCatSupport(PidToCidFun, lBound, uBound, acc);
-                        if (!existSC.dominate(lpfTmp, acc))
+                        lpfTmp = j.second.LPFCatSupport(PidToCidFun, lBound, uBound);
+                        if (!existSC.dominate(lpfTmp))
                         {
-                            Tree[rank[lid]].vertOut[k].second = {existSC.LPFMinSupForDec(lpfTmp, acc), 1};
+                            Tree[rank[lid]].vertOut[k].second = {existSC.LPFMinSupForDec(lpfTmp), 1};
                             SCreOut[lid].insert(Cid);
                             OC.insert(OrderCompp(lid));
                             if (ProID == debugID1 and Cid == debugID2)
@@ -1597,7 +3193,7 @@ void Graph::H2HDecBatDiGraph(vector<pair<int, int>> &wBatch, int timeWinId, int 
 //        EachNodeDecMain(rank[ProBeginVertexID]);
 //    }
     clock.tock();
-    cout << "** time for top-down refresh: " << clock.duration().count() << " seconds" << endl;
+//    cout << "** time for top-down refresh: " << clock.duration().count() << " seconds" << endl;
 }
 
 void Graph::EachNodeDecMainThread(const vector<int> &startSources)
@@ -1687,7 +3283,7 @@ void Graph::EachNodeDecMain(int sourceR)
                     bool cond = Tree[rank[a]].DisReOut.find(b) != Tree[rank[a]].DisReOut.end();
                     if (sbLabChanged or cond)
                     {
-                        lpfTmp = Tree[rank[a]].disOut[bH].LPFCatSupport(scBS, lBound, uBound, acc);
+                        lpfTmp = Tree[rank[a]].disOut[bH].LPFCatSupport(scBS, lBound, uBound);
                     }
                 } else if (i < bH)
                 {
@@ -1695,7 +3291,7 @@ void Graph::EachNodeDecMain(int sourceR)
                     bool cond = Tree[rank[b]].DisReIn.find(a) != Tree[rank[b]].DisReIn.end();
                     if (sbLabChanged or cond)
                     {
-                        lpfTmp = Tree[rank[b]].disIn[i].LPFCatSupport(scBS, lBound, uBound, acc);
+                        lpfTmp = Tree[rank[b]].disIn[i].LPFCatSupport(scBS, lBound, uBound);
                     }
                 }
 
@@ -1705,9 +3301,9 @@ void Graph::EachNodeDecMain(int sourceR)
                     lpfExist.display();
                     lpfTmp.display();
                 }
-                if (lpfTmp.vX.size() > 1 and !lpfExist.dominate(lpfTmp, acc))
+                if (lpfTmp.vX.size() > 1 and !lpfExist.dominate(lpfTmp))
                 {
-                    Tree[sourceR].disIn[i] = lpfExist.LPFMinSupForDec(lpfTmp, acc);
+                    Tree[sourceR].disIn[i] = lpfExist.LPFMinSupForDec(lpfTmp);
                     Tree[sourceR].DisReIn.insert(a);
                 }
             }
@@ -1736,7 +3332,7 @@ void Graph::EachNodeDecMain(int sourceR)
                     bool cond = Tree[rank[a]].DisReIn.find(b) != Tree[rank[a]].DisReIn.end();
                     if (scLabChanged or cond)
                     {
-                        lpfTmp = scSB.LPFCatSupport(Tree[rank[a]].disIn[bH], lBound, uBound, acc);
+                        lpfTmp = scSB.LPFCatSupport(Tree[rank[a]].disIn[bH], lBound, uBound);
                     }
                 } else if (i < bH)
                 {
@@ -1744,13 +3340,13 @@ void Graph::EachNodeDecMain(int sourceR)
                     if (scLabChanged or cond)
                     {
                         // i contracts after both sourceR and b, so se(b,i) is in Node of b
-                        lpfTmp = scSB.LPFCatSupport(Tree[rank[b]].disOut[i], lBound, uBound, acc);
+                        lpfTmp = scSB.LPFCatSupport(Tree[rank[b]].disOut[i], lBound, uBound);
                     }
                 }
 
-                if (lpfTmp.vX.size() > 1 and !lpfExist.dominate(lpfTmp, acc))
+                if (lpfTmp.vX.size() > 1 and !lpfExist.dominate(lpfTmp))
                 {
-                    Tree[sourceR].disOut[i] = lpfExist.LPFMinSupForDec(lpfTmp, acc);
+                    Tree[sourceR].disOut[i] = lpfExist.LPFMinSupForDec(lpfTmp);
                     Tree[sourceR].DisReOut.insert(a);
                 }
             }
@@ -1758,2031 +3354,764 @@ void Graph::EachNodeDecMain(int sourceR)
     }
 }
 
-bool Graph::lpfIsSupportBy(
-        LPFunction &f1, const LPFunction &halfLPF, const vector<int> &halfLPFChangedPoses, bool isSC) const
-{
-    // check if the change of halfLPF influences f1, halfLPFChangedPoses records the places where halfLPF is updated
-    assert(!halfLPFChangedPoses.empty());
-    if (halfLPFChangedPoses.size() == 1 and halfLPFChangedPoses[0] == -1)
-    {
-        // this case is when halfLPF's old turning points do not change but it is appended with new turning points
-        return true;
-    }
 
-    if (f1.ID1 == halfLPF.ID1 and f1.ID2 == halfLPF.ID2)
-    {
-        unordered_map<int, int> f2SupParts;
-        int w = NodeOrder[f1.ID1] < NodeOrder[f1.ID2] ? f1.ID1 : f1.ID2;
-
-        bool changed = false;
-        for (int i = 0; i < f1.vSupportPre.size(); i++)
-        {
-            if (f1.vSupportPre[i].find(w) == f1.vSupportPre[i].end())
-                continue;
-
-            for (const int &pos: f1.vSupportPre[i].at(w))
-            {
-                if (find(halfLPFChangedPoses.begin(),
-                         halfLPFChangedPoses.end(), pos) != halfLPFChangedPoses.end())
-                {
-                    int &cnt = f1.cntOfEachInt[i];
-                    cnt -= 1;
-                    if (cnt <= 0)
-                        changed = true;
-                }
-            }
-        }
-        return changed;
-    }
-
-    // u -> w -> v
-    int u = f1.ID1, w = -1, v = f1.ID2;
-    bool backHalf;
-    if (halfLPF.ID1 == u)
-    {
-        w = halfLPF.ID2;
-        backHalf = false;
-    } else
-    {
-        if (halfLPF.ID2 != v)
-        {
-            f1.display();
-            halfLPF.display();
-            assert(false);
-        }
-        w = halfLPF.ID1;
-        backHalf = true;
-    }
-
-    if (!f1.vSupportContains(w))
-        return false;
-
-    CatSupRec supportInfo;
-    if (isSC)
-    {
-        if (intermediateSCs[u].find(w) != intermediateSCs[u].end() and
-            intermediateSCs[u].at(w).find(v) != intermediateSCs[u].at(w).end())
-            supportInfo = intermediateSCs[u].at(w).find(v)->second;
-        else
-            return false;
-    } else
-    {
-        if (NodeOrder[u] < NodeOrder[v])
-        {
-            if (intermediateLBsIn[u].find(w) != intermediateLBsIn[u].end()
-                and intermediateLBsIn[u].at(w).find(v) != intermediateLBsIn[u].at(w).end())
-                supportInfo = intermediateLBsIn[u].at(w).find(v)->second;
-            else
-                return false;
-        } else
-        {
-            if (intermediateLBsOut[u].find(w) != intermediateLBsOut[u].end()
-                and intermediateLBsOut[u].at(w).find(v) != intermediateLBsOut[u].at(w).end())
-                supportInfo = intermediateLBsOut[u].at(w).find(v)->second;
-            else
-                return false;
-        }
-    }
-    if (supportInfo.vX1.empty())
-        return false;
-
-    // map changed parts of halfLPF to intermediateSCs[w][u][v]
-    vector<int> cctLPFvX;
-    if (backHalf)
-        cctLPFvX = supportInfo.vX2;
-    else
-        cctLPFvX = supportInfo.vX1;
-
-    unordered_set<int> changedPosInConcatLPF;
-    int itv = 0;
-//    assert(!cctLPFvX.empty() and halfLPF.vX.front() <= cctLPFvX.front());
-    for (const auto &changedPosInHalfLPF: halfLPFChangedPoses)
-    {
-        // changedPosInConcatLPF is the changed part of intermediate[w][u][v] (i.e., suppInfo.first)
-        int t1 = halfLPF.vX[changedPosInHalfLPF], t2 = halfLPF.vX[changedPosInHalfLPF + 1];
-        while (itv + 1 < cctLPFvX.size() and cctLPFvX[itv + 1] < t1)
-            itv++;
-
-        while (itv < cctLPFvX.size() and cctLPFvX[itv] < t2)
-        {
-            changedPosInConcatLPF.insert(itv);
-            itv++;
-        }
-    }
-
-    bool changed = false;
-    for (int i = 0; i < f1.vSupportPre.size(); i++)
-    {
-        if (f1.vSupportPre[i].find(w) == f1.vSupportPre[i].end())
-            continue;
-        for (const int &pos: f1.vSupportPre[i].at(w))
-        {
-            // cctLPF[pos] supports f1[i]
-            if (changedPosInConcatLPF.find(pos) != changedPosInConcatLPF.end())
-            {
-                int &cnt = f1.cntOfEachInt[i];
-                cnt -= 1;
-                if (cnt <= 0)
-                    changed = true;
-            }
-        }
-    }
-    return changed;
-}
-
-void Graph::CHUpdate(vector<pair<int, int>> &wBatch)
-{
-    cout << "Index maintenance for " << wBatch.size() << " increase updates" << endl;
-    unordered_map < pair<int, int>, LPFunction, boost::hash<pair<int, int>> > OCdisOld;
-
-    // NodeOrderss.clear();
-    NodeOrderss.assign(NodeOrder.begin(), NodeOrder.end());
-    vector<set<int>> SCreIn, SCreOut; //SCre.clear();
-    set<int> ss; //ss.clear();
-    SCreIn.assign(nodeNum, ss), SCreOut.assign(nodeNum, ss); //{vertexID, set<int>}
-    set < OrderCompp > OC;
-    OC.clear();//vertexID in decreasing Node order
-
-    int debugID1 = 1, debugID2 = 1;
-    std::random_device rd; // obtain a random number from hardware
-    std::mt19937 gen(rd()); // seed the generator
-    std::uniform_int_distribution<> distr(1, 10);
-
-    for (const auto &k: wBatch)
-    {
-        int a = k.first;
-        int b = k.second;
-        if (a == debugID1 and b == debugID2)
-            cout << 1;
-        int lId = NodeOrder[a] < NodeOrder[b] ? a : b;
-//        int vX = uBound;
-        int newW, oldW, pos, vX;
-//        newW = k.second.second;
-//        double frac = k.second.second;
-        bool outOfBound = true;
-        for (const auto &i: adjEdge[a])
-        {
-            if (i.first == b)
-            {
-                LPFunction &lpf = vEdge[i.second].lpf;
-
-                outOfBound = false;
-                if (distr(gen) <= 7)
-                {
-                    vX = lpf.vX.back();
-                    oldW = lpf.vY.back();
-                } else
-                {
-                    vX = lpf.vX.back() - deltaT;
-                    oldW = lpf.getY(vX);
-                }
-
-                if (distr(gen) <= 5)
-                    newW = ceil((double) oldW * 1.1);
-                else
-                    newW = ceil((double) oldW * 0.9);
-
-                vector<int>::const_iterator low;
-                low = lower_bound(lpf.vX.begin(), lpf.vX.end(), vX);
-                pos = (int) (low - lpf.vX.begin());
-
-                if (lpf.vX[pos] == vX)
-                {
-                    lpf.vY[pos] = newW;
-                } else if (lpf.vX[pos] > vX)
-                {
-                    lpf.vX.insert(low, vX);
-                    lpf.vY.insert(lpf.vY.begin() + pos, newW);
-                    assert(lpf.vX[pos] == vX);
-                }
-
-                vector<int> newX = lpf.vX, newY = lpf.vY;
-                lpf.setValue(newX, newY, -1, acc);
-                for (int j = 0; j < lpf.vX.size() - 1; j++)
-                {
-                    lpf.vSupportPre.push_back({{lId, {j}}});
-                }
-
-//                low = lower_bound(lpf.vX.begin(), lpf.vX.end(), vX);
-//                pos = (int) (low - lpf.vX.begin());
-//                lpf.lastItvSubToChange = pos > 0 ? pos - 1 : 0;
-
-                CatSupRec catSupRec;
-                catSupRec.vX1 = lpf.vX;
-                catSupRec.vX2 = lpf.vX;
-                catSupRec.vY = lpf.vY;
-
-                intermediateSCs[a][a][b] = catSupRec;
-                break;
-            }
-        }
-
-        if (outOfBound)
-            continue;
-
-        if (lId == a)
-        {
-            for (const auto &j: Tree[rank[a]].vertOut)
-            {
-                if (j.first == b and j.second.first.vSupportContains(a))
-                {
-                    OCdisOld[{a, b}] = j.second.first;
-                    SCreOut[a].insert(b);
-                    OC.insert(OrderCompp(a));
-                    break;
-                }
-            }
-        } else
-        {
-            for (const auto &j: Tree[rank[b]].vertIn)
-            {
-                if (j.first == a and j.second.first.vSupportContains(b))
-                {
-                    OCdisOld[{a, b}] = j.second.first;
-                    SCreIn[b].insert(a);
-                    OC.insert(OrderCompp(b));
-                    break;
-                }
-            }
-        }
-    }
-    cout << "** finish sc refresh" << endl;
-
-    int ProID;
-    bool influence;
-
-    while (!OC.empty())
-    {
-        ProID = (*OC.begin()).x;
-        if (ProID == -1)
-            cout << 1;
-
-        OC.erase(OC.begin());
-        influence = false;
-
-//        cout << "ProID: " << ProID << " " << Tree[rank[ProID]].disIn.size() << endl;
-        for (const auto &Cid: SCreIn[ProID])
-        {
-            if (Cid == debugID1 and ProID == debugID2)
-                cout << 1;
-            int CidH = Tree[rank[Cid]].height - 1;
-            /* check if sc(cid,pid) is really influenced, if so, update it with the new function */
-            LPFunction scCPNew;
-            for (const auto &i: adjEdge[Cid])
-            {
-                if (i.first == ProID)
-                {
-                    scCPNew = vEdge[i.second].lpf;
-                    break;
-                }
-            }
-
-            for (auto &vs: SCconNodesMT[Cid][ProID])
-            {
-                LPFunction CidToVS, vsToProId;
-                for (const auto &i: Tree[rank[vs]].vertIn)
-                {
-                    if (i.first == Cid)
-                    {
-                        CidToVS = i.second.first;
-                        break;
-                    }
-                }
-                for (const auto &i: Tree[rank[vs]].vertOut)
-                {
-                    if (i.first == ProID)
-                    {
-                        vsToProId = i.second.first;
-                        break;
-                    }
-                }
-
-                LPFunction CPTmp;
-                bool empty = scCPNew.vX.size() <= 1;
-                CatSupRec &catSupRec = intermediateSCs[Cid][vs][ProID];
-                if (empty)
-                {
-                    CPTmp = CidToVS.LPFCatSupport(vsToProId, lBound, uBound, catSupRec, acc);
-                    scCPNew = CPTmp;
-                } else if (CidToVS.minY + vsToProId.minY <= scCPNew.maxY)
-                {
-                    CPTmp = CidToVS.LPFCatSupport(vsToProId, lBound, uBound, catSupRec, acc);
-                }
-
-                if (!empty and CPTmp.vX.size() > 1 and !scCPNew.dominate(CPTmp, acc))
-                {
-                    scCPNew = scCPNew.LPFMinSupByPlaneSweep(CPTmp, acc);
-                }
-            }
-
-            LPFunction scCPOld = OCdisOld[{Cid, ProID}];
-
-            vector<int> changedPos;
-            if (scCPOld.equal(scCPNew, changedPos))
-                continue;
-
-            for (auto &j: Tree[rank[ProID]].vertIn)
-            {
-                if (j.first == Cid)
-                {
-                    assert(scCPNew.ID1 == Cid and scCPNew.ID2 == ProID);
-                    j.second = {scCPNew, 1};
-                    break;
-                }
-            }
-
-            // HneiOut: <accessories contract after Cid, lpf from ProId to hid
-            unordered_set<int> HneiOut;
-            // LneiOut: accessories contract after ProId and before Cid, lpf from ProId to lid
-            vector<int> LneiOut;
-            for (auto &j: Tree[rank[ProID]].vertOut)
-            {
-                // j.first is the accessory of ProID
-                if (NodeOrder[j.first] > NodeOrder[Cid])
-                    HneiOut.insert(j.first);
-                else if (NodeOrder[j.first] < NodeOrder[Cid])
-                    LneiOut.emplace_back(j.first);
-            }
-
-            // in theory, scCPOld should dominate scCPNew, but due to rounding, domination may not hold
-            bool newSCDec = !scCPOld.dominate(scCPNew, acc); // assert(newSCDec == false);
-
-            for (auto &i: Tree[rank[Cid]].vertOut)
-            {
-                int hid = i.first;
-                if (HneiOut.find(hid) != HneiOut.end())
-                {
-                    bool changed =
-                            newSCDec or i.second.second <= 0 or
-                            lpfIsSupportBy(i.second.first, scCPOld, changedPos, true);
-                    if (i.second.second > 0 and changed)
-                    {
-                        OCdisOld[{Cid, hid}] = i.second.first;
-                        SCreOut[Cid].insert(hid);
-                        OC.insert(OrderCompp(Cid));
-                        i.second.second = 0;
-                    }
-                }
-            }
-
-            for (auto &i: LneiOut)
-            {
-                int lid = i;
-                for (auto &j: Tree[rank[lid]].vertIn)
-                {
-                    if (j.first == Cid)
-                    {
-                        bool changed =
-                                newSCDec or j.second.second <= 0 or
-                                lpfIsSupportBy(j.second.first, scCPOld, changedPos, true);
-                        if (j.second.second > 0 and changed)
-                        {
-                            OCdisOld[{Cid, lid}] = j.second.first;
-                            SCreIn[lid].insert(Cid);
-                            OC.insert(OrderCompp(lid));
-                            j.second.second = 0;
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-
-        for (const auto &Cid: SCreOut[ProID])
-        {
-            if (Cid == debugID2 and ProID == debugID1)
-                cout << 1;
-            int CidH = Tree[rank[Cid]].height - 1;
-
-            /* check if sc(pid,cid) is really influenced, if so, update it with the new function */
-            LPFunction scPCNew;
-            for (const auto &i: adjEdge[ProID])
-            {
-                if (i.first == Cid)
-                {
-                    scPCNew = vEdge[i.second].lpf;
-                    break;
-                }
-            }
-
-            for (auto &vs: SCconNodesMT[ProID][Cid])
-            {
-                LPFunction ProidToVS, vsToCid;
-                for (const auto &i: Tree[rank[vs]].vertIn)
-                {
-                    if (i.first == ProID)
-                    {
-                        ProidToVS = i.second.first;
-                        break;
-                    }
-                }
-
-                for (const auto &i: Tree[rank[vs]].vertOut)
-                {
-                    if (i.first == Cid)
-                    {
-                        vsToCid = i.second.first;
-                        break;
-                    }
-                }
-
-                assert(ProidToVS.ID1 == ProID and vsToCid.ID2 == Cid);
-                LPFunction PCTmp;
-                bool empty = scPCNew.vX.size() <= 1;
-                CatSupRec &catSupRec = intermediateSCs[ProID][vs][Cid];
-                if (empty)
-                {
-                    PCTmp = ProidToVS.LPFCatSupport(vsToCid, lBound, uBound, catSupRec, acc);
-                    scPCNew = PCTmp;
-                } else if (ProidToVS.minY + vsToCid.minY <= scPCNew.maxY)
-                {
-                    PCTmp = ProidToVS.LPFCatSupport(vsToCid, lBound, uBound, catSupRec, acc);
-                }
-
-                if (!empty and PCTmp.vX.size() > 1 and !scPCNew.dominate(PCTmp, acc))
-                {
-                    scPCNew = scPCNew.LPFMinSupByPlaneSweep(PCTmp, acc);
-                }
-            }
-
-            LPFunction scPCOld = OCdisOld[{ProID, Cid}];
-            vector<int> changedPos;
-            if (scPCOld.equal(scPCNew, changedPos))
-                continue;
-            for (auto &j: Tree[rank[ProID]].vertOut)
-            {
-                if (j.first == Cid)
-                {
-                    assert(scPCNew.ID1 == ProID and scPCNew.ID2 == Cid);
-                    j.second = {scPCNew, 1};
-                    break;
-                }
-            }
-
-            unordered_set<int> HneiIn;
-            vector<int> LneiIn;
-            for (auto &i: Tree[rank[ProID]].vertIn)
-            {
-                // j.first is the accessory of ProID
-                if (NodeOrder[i.first] > NodeOrder[Cid])
-                    HneiIn.insert(i.first);
-                else if (NodeOrder[i.first] < NodeOrder[Cid])
-                    LneiIn.emplace_back(i.first);
-            }
-
-            // in theory, scCPOld should dominate scCPNew, but due to rounding, domination may not hold
-            bool newSCDec = !scPCOld.dominate(scPCNew, acc); // assert(newSCDec == false);
-
-            for (auto &i: Tree[rank[Cid]].vertIn)
-            {
-                int hid = i.first;
-                if (HneiIn.find(hid) != HneiIn.end())
-                {
-                    bool changed =
-                            newSCDec or i.second.second <= 0 or
-                            lpfIsSupportBy(i.second.first, scPCOld, changedPos, true);
-                    if (i.second.second > 0 and changed)
-                    {
-                        OCdisOld[{hid, Cid}] = i.second.first;
-                        SCreIn[Cid].insert(hid);
-                        OC.insert(OrderCompp(Cid));
-                        i.second.second = 0;
-                    }
-                }
-            }
-
-            for (auto &lid: LneiIn)
-            {
-                for (auto &i: Tree[rank[lid]].vertOut)
-                {
-                    if (i.first == Cid)
-                    {
-                        bool changed =
-                                newSCDec or i.second.second <= 0 or
-                                lpfIsSupportBy(i.second.first, scPCOld, changedPos, true);
-                        if (i.second.second > 0 and changed)
-                        {
-                            OCdisOld[{lid, Cid}] = i.second.first;
-                            SCreOut[lid].insert(Cid);
-                            OC.insert(OrderCompp(lid));
-                            i.second.second = 0;
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    cout << "** finish bottom-up refresh" << endl;
-}
-
-void Graph::H2HIncBatDiGraph(vector<pair<int, int>> &wBatch)
-{
-    cout << "Index maintenance for " << wBatch.size() << " increase updates" << endl;
-    unordered_map < pair<int, int>, LPFunction, boost::hash<pair<int, int>> > OCdisOld;
-
-    // NodeOrderss.clear();
-    NodeOrderss.assign(NodeOrder.begin(), NodeOrder.end());
-    vector<set<int>> SCreIn, SCreOut; //SCre.clear();
-    set<int> ss; //ss.clear();
-    SCreIn.assign(nodeNum, ss), SCreOut.assign(nodeNum, ss); //{vertexID, set<int>}
-    set < OrderCompp > OC;
-    OC.clear();//vertexID in decreasing Node order
-
-    int debugID1 = 1, debugID2 = 1;
-    std::random_device rd; // obtain a random number from hardware
-    std::mt19937 gen(rd()); // seed the generator
-    std::uniform_int_distribution<> distr(1, 10);
-
-    for (const auto &k: wBatch)
-    {
-        int a = k.first;
-        int b = k.second;
-        if (a == debugID1 and b == debugID2)
-            cout << 1;
-        int lId = NodeOrder[a] < NodeOrder[b] ? a : b;
-
-        int newW, oldW, pos, updX;
-        bool outOfBound = true;
-        for (const auto &i: adjEdge[a])
-        {
-            if (i.first == b)
-            {
-                LPFunction &lpf = vEdge[i.second].lpf;
-
-                outOfBound = false;
-                if (distr(gen) <= 7)
-                {
-                    updX = lpf.vX.back();
-                    oldW = lpf.vY.back();
-                } else
-                {
-                    updX = lpf.vX.back() - deltaT;
-                    oldW = lpf.getY(updX);
-                }
-
-                if (distr(gen) <= 5)
-                    newW = ceil((double) oldW * 1.1);
-                else
-                    newW = ceil((double) oldW * 0.9);
-
-                vector<int>::const_iterator low;
-                low = lower_bound(lpf.vX.begin(), lpf.vX.end(), updX);
-                pos = (int) (low - lpf.vX.begin());
-
-                if (lpf.vX[pos] == updX)
-                {
-                    lpf.vY[pos] = newW;
-                } else if (lpf.vX[pos] > updX)
-                {
-                    lpf.vX.insert(low, updX);
-                    lpf.vY.insert(lpf.vY.begin() + pos, newW);
-                    assert(lpf.vX[pos] == updX);
-                }
-
-                vector<int> newX = lpf.vX, newY = lpf.vY;
-                lpf.setValue(newX, newY, -1, acc);
-                for (int j = 0; j < lpf.vX.size() - 1; j++)
-                {
-                    lpf.vSupportPre.push_back({{lId, {j}}});
-                }
-
-//                low = lower_bound(lpf.vX.begin(), lpf.vX.end(), vX);
-//                pos = (int) (low - lpf.vX.begin());
-//                lpf.lastItvSubToChange = pos > 0 ? pos - 1 : 0;
-
-                CatSupRec catSupRec;
-                catSupRec.vX1 = lpf.vX;
-                catSupRec.vX2 = lpf.vX;
-                catSupRec.vY = lpf.vY;
-
-                intermediateSCs[a][a][b] = catSupRec;
-                break;
-            }
-        }
-
-        if (outOfBound)
-            continue;
-
-        if (lId == a)
-        {
-            for (const auto &j: Tree[rank[a]].vertOut)
-            {
-                if (j.first == b and j.second.first.vSupportContains(a))
-                {
-                    OCdisOld[{a, b}] = j.second.first;
-                    SCreOut[a].insert(b);
-                    OC.insert(OrderCompp(a));
-                    break;
-                }
-            }
-        } else
-        {
-            for (const auto &j: Tree[rank[b]].vertIn)
-            {
-                if (j.first == a and j.second.first.vSupportContains(b))
-                {
-                    OCdisOld[{a, b}] = j.second.first;
-                    SCreIn[b].insert(a);
-                    OC.insert(OrderCompp(b));
-                    break;
-                }
-            }
-        }
-    }
-    cout << "** finish sc refresh" << endl;
-
-    vector<int> ProBeginVertexSet;
-    vector<int> ProBeginVertexSetNew;
-    int ProID;
-    bool influence;
-
-    while (!OC.empty())
-    {
-        ProID = (*OC.begin()).x;
-        if (ProID == -1)
-            cout << 1;
-
-        OC.erase(OC.begin());
-        influence = false;
-
-//        cout << "ProID: " << ProID << " " << Tree[rank[ProID]].disIn.size() << endl;
-        for (const auto &Cid: SCreIn[ProID])
-        {
-            if (Cid == debugID1 and ProID == debugID2)
-                cout << 1;
-            int CidH = Tree[rank[Cid]].height - 1;
-            /* check if sc(cid,pid) is really influenced, if so, update it with the new function */
-            LPFunction scCPNew;
-            for (const auto &i: adjEdge[Cid])
-            {
-                if (i.first == ProID)
-                {
-                    scCPNew = vEdge[i.second].lpf;
-                    break;
-                }
-            }
-
-            for (auto &vs: SCconNodesMT[Cid][ProID])
-            {
-                LPFunction CidToVS, vsToProId;
-                for (const auto &i: Tree[rank[vs]].vertIn)
-                {
-                    if (i.first == Cid)
-                    {
-                        CidToVS = i.second.first;
-                        break;
-                    }
-                }
-                for (const auto &i: Tree[rank[vs]].vertOut)
-                {
-                    if (i.first == ProID)
-                    {
-                        vsToProId = i.second.first;
-                        break;
-                    }
-                }
-
-                LPFunction CPTmp;
-                bool empty = scCPNew.vX.size() <= 1;
-                CatSupRec &catSupRec = intermediateSCs[Cid][vs][ProID];
-                if (empty)
-                {
-                    CPTmp = CidToVS.LPFCatSupport(vsToProId, lBound, uBound, catSupRec, acc);
-                    scCPNew = CPTmp;
-                } else if (CidToVS.minY + vsToProId.minY <= scCPNew.maxY)
-                {
-                    CPTmp = CidToVS.LPFCatSupport(vsToProId, lBound, uBound, catSupRec, acc);
-                }
-
-                if (!empty and CPTmp.vX.size() > 1 and !scCPNew.dominate(CPTmp, acc))
-                {
-                    scCPNew = scCPNew.LPFMinSupByPlaneSweep(CPTmp, acc);
-                }
-            }
-
-            LPFunction scCPOld = OCdisOld[{Cid, ProID}];
-
-            vector<int> changedPos;
-            if (scCPOld.equal(scCPNew, changedPos))
-                continue;
-
-            for (auto &j: Tree[rank[ProID]].vertIn)
-            {
-                if (j.first == Cid)
-                {
-                    assert(scCPNew.ID1 == Cid and scCPNew.ID2 == ProID);
-                    j.second = {scCPNew, 1};
-                    break;
-                }
-            }
-
-            // HneiOut: <accessories contract after Cid, lpf from ProId to hid
-            unordered_set<int> HneiOut;
-            // LneiOut: accessories contract after ProId and before Cid, lpf from ProId to lid
-            vector<int> LneiOut;
-            for (auto &j: Tree[rank[ProID]].vertOut)
-            {
-                // j.first is the accessory of ProID
-                if (NodeOrder[j.first] > NodeOrder[Cid])
-                    HneiOut.insert(j.first);
-                else if (NodeOrder[j.first] < NodeOrder[Cid])
-                    LneiOut.emplace_back(j.first);
-            }
-
-            // in theory, scCPOld should dominate scCPNew, but due to rounding, domination may not hold
-            bool newSCDec = !scCPOld.dominate(scCPNew, acc); // assert(newSCDec == false);
-
-            for (auto &i: Tree[rank[Cid]].vertOut)
-            {
-                int hid = i.first;
-                if (HneiOut.find(hid) != HneiOut.end())
-                {
-                    bool changed =
-                            newSCDec or i.second.second <= 0 or
-                            lpfIsSupportBy(i.second.first, scCPOld, changedPos, true);
-                    if (i.second.second > 0 and changed)
-                    {
-                        OCdisOld[{Cid, hid}] = i.second.first;
-                        SCreOut[Cid].insert(hid);
-                        OC.insert(OrderCompp(Cid));
-                        i.second.second = 0;
-                    }
-                }
-            }
-
-            for (auto &i: LneiOut)
-            {
-                int lid = i;
-                for (auto &j: Tree[rank[lid]].vertIn)
-                {
-                    if (j.first == Cid)
-                    {
-                        bool changed =
-                                newSCDec or j.second.second <= 0 or
-                                lpfIsSupportBy(j.second.first, scCPOld, changedPos, true);
-                        if (j.second.second > 0 and changed)
-                        {
-                            OCdisOld[{Cid, lid}] = j.second.first;
-                            SCreIn[lid].insert(Cid);
-                            OC.insert(OrderCompp(lid));
-                            j.second.second = 0;
-                        }
-                        break;
-                    }
-                }
-            }
-
-            int pAncs = (int) Tree[rank[ProID]].ancIDs.size();
-            for (int i = 0; i < pAncs; i++)
-            {
-                // i -> cid -> pid
-                LPFunction &disIP = Tree[rank[ProID]].disIn[i];
-                if (newSCDec)
-                {
-                    if (i == CidH)
-                        influence = true;
-                    Tree[rank[ProID]].cntIn[i] = 0;
-                } else if (lpfIsSupportBy(disIP, scCPOld, changedPos, false))
-                {
-                    Tree[rank[ProID]].cntIn[i] = 0;
-                    if (i == CidH)
-                        influence = true;
-                }
-            }
-
-//            scCPNew.scSupToLbSup(ProID);
-            CatSupRec catSupRec;
-            catSupRec.vX1 = scCPNew.vX;
-            catSupRec.vX2 = scCPNew.vX;
-            catSupRec.vY = scCPNew.vY;
-            intermediateLBsIn[ProID][ProID][Cid] = catSupRec;
-        }
-
-        for (const auto &Cid: SCreOut[ProID])
-        {
-            if (Cid == debugID2 and ProID == debugID1)
-                cout << 1;
-            int CidH = Tree[rank[Cid]].height - 1;
-
-            /* check if sc(pid,cid) is really influenced, if so, update it with the new function */
-            LPFunction scPCNew;
-            for (const auto &i: adjEdge[ProID])
-            {
-                if (i.first == Cid)
-                {
-                    scPCNew = vEdge[i.second].lpf;
-                    break;
-                }
-            }
-
-            for (auto &vs: SCconNodesMT[ProID][Cid])
-            {
-                LPFunction ProidToVS, vsToCid;
-                for (const auto &i: Tree[rank[vs]].vertIn)
-                {
-                    if (i.first == ProID)
-                    {
-                        ProidToVS = i.second.first;
-                        break;
-                    }
-                }
-
-                for (const auto &i: Tree[rank[vs]].vertOut)
-                {
-                    if (i.first == Cid)
-                    {
-                        vsToCid = i.second.first;
-                        break;
-                    }
-                }
-
-                assert(ProidToVS.ID1 == ProID and vsToCid.ID2 == Cid);
-                LPFunction PCTmp;
-                bool empty = scPCNew.vX.size() <= 1;
-                CatSupRec &catSupRec = intermediateSCs[ProID][vs][Cid];
-                if (empty)
-                {
-                    PCTmp = ProidToVS.LPFCatSupport(vsToCid, lBound, uBound, catSupRec, acc);
-                    scPCNew = PCTmp;
-                } else if (ProidToVS.minY + vsToCid.minY <= scPCNew.maxY)
-                {
-                    PCTmp = ProidToVS.LPFCatSupport(vsToCid, lBound, uBound, catSupRec, acc);
-                }
-
-                if (!empty and PCTmp.vX.size() > 1 and !scPCNew.dominate(PCTmp, acc))
-                {
-                    scPCNew = scPCNew.LPFMinSupByPlaneSweep(PCTmp, acc);
-                }
-            }
-
-            LPFunction scPCOld = OCdisOld[{ProID, Cid}];
-            vector<int> changedPos;
-            if (scPCOld.equal(scPCNew, changedPos))
-                continue;
-            for (auto &j: Tree[rank[ProID]].vertOut)
-            {
-                if (j.first == Cid)
-                {
-                    assert(scPCNew.ID1 == ProID and scPCNew.ID2 == Cid);
-                    j.second = {scPCNew, 1};
-                    break;
-                }
-            }
-
-            unordered_set<int> HneiIn;
-            vector<int> LneiIn;
-            for (auto &i: Tree[rank[ProID]].vertIn)
-            {
-                // j.first is the accessory of ProID
-                if (NodeOrder[i.first] > NodeOrder[Cid])
-                    HneiIn.insert(i.first);
-                else if (NodeOrder[i.first] < NodeOrder[Cid])
-                    LneiIn.emplace_back(i.first);
-            }
-
-            // in theory, scCPOld should dominate scCPNew, but due to rounding, domination may not hold
-            bool newSCDec = !scPCOld.dominate(scPCNew, acc); // assert(newSCDec == false);
-
-            for (auto &i: Tree[rank[Cid]].vertIn)
-            {
-                int hid = i.first;
-                if (HneiIn.find(hid) != HneiIn.end())
-                {
-                    bool changed =
-                            newSCDec or i.second.second <= 0 or
-                            lpfIsSupportBy(i.second.first, scPCOld, changedPos, true);
-                    if (i.second.second > 0 and changed)
-                    {
-                        OCdisOld[{hid, Cid}] = i.second.first;
-                        SCreIn[Cid].insert(hid);
-                        OC.insert(OrderCompp(Cid));
-                        i.second.second = 0;
-                    }
-                }
-            }
-
-            for (auto &lid: LneiIn)
-            {
-                for (auto &i: Tree[rank[lid]].vertOut)
-                {
-                    if (i.first == Cid)
-                    {
-                        bool changed = newSCDec or i.second.second <= 0 or
-                                       lpfIsSupportBy(i.second.first, scPCOld, changedPos, true);
-                        if (i.second.second > 0 and changed)
-                        {
-                            OCdisOld[{lid, Cid}] = i.second.first;
-                            SCreOut[lid].insert(Cid);
-                            OC.insert(OrderCompp(lid));
-                            i.second.second = 0;
-                        }
-                        break;
-                    }
-                }
-            }
-
-            influence = true;
-            int pAncs = (int) Tree[rank[ProID]].ancIDs.size();
-            for (int i = 0; i < pAncs; i++)
-            {
-                LPFunction &disPI = Tree[rank[ProID]].disOut[i], disCI;
-                if (newSCDec)
-                {
-                    if (i == CidH)
-                        influence = true;
-                    Tree[rank[ProID]].cntOut[i] = 0;
-                } else if (lpfIsSupportBy(disPI, scPCOld, changedPos, false))
-                {
-                    Tree[rank[ProID]].cntOut[i] = 0;
-                    if (i == CidH)
-                        influence = true;
-                }
-            }
-
-//            scPCNew.scSupToLbSup(ProID);
-            CatSupRec catSupRec;
-            catSupRec.vX1 = scPCNew.vX;
-            catSupRec.vX2 = scPCNew.vX;
-            catSupRec.vY = scPCNew.vY;
-            intermediateLBsOut[ProID][ProID][Cid] = catSupRec;
-        }
-
-        if (influence)
-        {
-            ProBeginVertexSetNew.clear();
-            ProBeginVertexSetNew.reserve(ProBeginVertexSet.size() + 1);
-            ProBeginVertexSetNew.push_back(ProID);
-            int rnew = rank[ProID], r;
-            for (int i: ProBeginVertexSet)
-            {
-                r = rank[i];
-                if (LCAQuery(rnew, r) != rnew)
-                {
-                    ProBeginVertexSetNew.push_back(i);
-                }
-            }
-            ProBeginVertexSet = ProBeginVertexSetNew;
-        }
-    }
-
-    cout << "** finish bottom-up refresh" << endl;
-
-    Timer clock;
-    clock.tick();
-    EachNodeIncMainThread(ProBeginVertexSet);
-    clock.tock();
-    cout << "** time for top-down refresh: " << clock.duration().count() << " seconds" << endl;
-}
-
-void Graph::EachNodeIncMainThread(const vector<int> &sources)
-{
-    vector<int> uRanks;
-    uRanks.reserve(sources.size());
-    for (int ProBeginVertexID: sources)
-    {
-        uRanks.push_back(rank[ProBeginVertexID]);
-    }
-
-    Timer clock;
-    clock.tick();
-    while (!uRanks.empty() and uRanks.size() < threadNum)
-    {
-        boost::thread_group threads;
-        for (const auto &u: uRanks)
-        {
-            threads.create_thread(boost::bind(&Graph::EachNodeIncMain, this, u));
-        }
-        threads.join_all();
-
-        vector<int> newURanks;
-        for (const auto &ur: uRanks)
-        {
-            for (int j: Tree[ur].vChildren)
-            {
-                newURanks.push_back(j);
-            }
-        }
-        uRanks = newURanks;
-    }
-    clock.tock();
-//    cout << "** time for top-down refresh 1: " << clock.duration().count() << " ms" << endl;
-
-    clock.tick();
-    boost::thread_group threads;
-    for (const auto &ur: uRanks)
-    {
-        threads.create_thread(boost::bind(&Graph::EachNodeIncMainRec, this, ur));
-    }
-    threads.join_all();
-    clock.tock();
-//    cout << "** time for top-down refresh 2: " << clock.duration().count() << " ms" << endl;
-}
-
-void Graph::EachNodeIncMainRec(int uRank)
-{
-    EachNodeIncMain(uRank);
-    for (int j: Tree[uRank].vChildren)
-        EachNodeIncMainRec(j);
-}
-
-void Graph::EachNodeIncMain(int uRank)
-{
-    int u = Tree[uRank].uniqueVertex;
-    int uH = Tree[uRank].height - 1;
-
-    vector<int> line = Tree[uRank].ancIDs;
-
-    for (int aH = 0; aH < line.size(); aH++)
-    {
-        int a = line[aH];
-        LPFunction disAUOld = Tree[uRank].disIn[aH];
-
-        if (Tree[uRank].cntIn[aH] > 0) continue;
-        //firstly, calculate the actual distance
-        int b, bH;
-        LPFunction disAUMin, scBU;
-        for (int j = 0; j < Tree[uRank].vertIn.size(); j++)
-        {
-            // a -> b -> u
-            b = Tree[uRank].vertIn[j].first;
-            scBU = Tree[uRank].vertIn[j].second.first;
-            scBU.scSupToLbSup(u);
-            bH = Tree[rank[b]].height - 1;
-            bool empty = disAUMin.vX.size() < 2;
-            LPFunction disAUTmp;
-            CatSupRec &catSupRec = intermediateLBsIn[u][b][a];
-            if (bH < aH)
-            {
-                LPFunction disAB = Tree[rank[a]].disOut[bH];
-                if (empty)
-                {
-                    disAUTmp = disAB.LPFCatSupport(scBU, lBound, uBound, catSupRec, acc);
-                    disAUMin = disAUTmp;
-                } else if (disAB.minY + scBU.minY <= disAUMin.maxY)
-                {
-                    disAUTmp = disAB.LPFCatSupport(scBU, lBound, uBound, catSupRec, acc);
-                }
-            } else if (bH == aH)
-            {
-                // b == a
-                if (empty)
-                {
-                    disAUTmp = scBU;
-                    disAUMin = disAUTmp;
-                } else if (scBU.minY <= disAUMin.maxY or scBU.vX.back() > disAUMin.vX.back())
-                    disAUTmp = scBU;
-            } else
-            {
-                LPFunction disAB = Tree[rank[b]].disIn[aH];
-                if (empty)
-                {
-                    disAUTmp = disAB.LPFCatSupport(scBU, lBound, uBound, catSupRec, acc);
-                    disAUMin = disAUTmp;
-                } else if (disAB.minY + scBU.minY <= disAUMin.maxY)
-                {
-                    disAUTmp = disAB.LPFCatSupport(scBU, lBound, uBound, catSupRec, acc);
-                }
-            }
-
-            if (disAUTmp.vX.size() > 1 and u == 1 and a == 1)
-            {
-                cout << "~~~~~~~~~~~~~~~~~~~" << endl;
-                disAUMin.display();
-                disAUTmp.display();
-            }
-            if (!empty and disAUTmp.vX.size() > 1 and !disAUMin.dominate(disAUTmp, acc))
-            {
-                disAUMin = disAUMin.LPFMinSupByPlaneSweep(disAUTmp, acc);
-            }
-            assert(disAUMin.ID1 == a and disAUMin.ID2 == u);
-        }
-
-        vector<int> changedPos;
-        bool updated = disAUMin.vX.size() > 1 and !disAUOld.equal(disAUMin, changedPos);
-        if (!updated)
-            continue;
-
-        Tree[uRank].disIn[aH] = disAUMin;
-        Tree[uRank].cntIn[aH] = 1;
-
-        bool newLabDec = !disAUOld.dominate(disAUMin, acc);
-        // firstly, check which dis can be infected
-        for (int vRank: VidtoTNid[u])
-        {
-            // lb(a, u) + sc(u, v)
-            int &cnt = Tree[vRank].cntIn[aH];
-            if (cnt == 0)
-                continue;
-            LPFunction &disAV = Tree[vRank].disIn[aH];
-            bool changed = newLabDec or lpfIsSupportBy(disAV, disAUOld, changedPos, false);
-            if (changed)
-                cnt = 0;
-        }
-
-        for (int vRank: VidtoTNid[a])
-        {
-            // sc(v, a) + lb(a, u)
-            if (Tree[vRank].height <= Tree[uRank].height or Tree[vRank].ancIDs[uH] != u)
-                continue;
-            int &cnt = Tree[vRank].cntOut[uH];
-            if (cnt == 0)
-                continue;
-            LPFunction &disVU = Tree[vRank].disOut[uH];
-            bool changed = newLabDec or lpfIsSupportBy(disVU, disAUOld, changedPos, false);
-            if (changed)
-                cnt = 0;
-        }
-    }
-
-    for (int aH = 0; aH < line.size(); aH++)
-    {
-        int a = line[aH];
-        LPFunction disUAOld = Tree[uRank].disOut[aH];
-
-        if (Tree[uRank].cntOut[aH] > 0) continue;
-        //firstly, calculate the actual distance
-        int b, bH;
-
-        LPFunction disUAMin, scUB, scUA;
-        for (int j = 0; j < Tree[uRank].vertOut.size(); j++)
-        {
-            // a <- b <- u
-            b = Tree[uRank].vertOut[j].first;
-            scUB = Tree[uRank].vertOut[j].second.first;
-            scUB.scSupToLbSup(u);
-            bH = Tree[rank[b]].height - 1;
-            bool empty = disUAMin.vX.size() < 2;
-            LPFunction disUATmp;
-            CatSupRec &catSupRec = intermediateLBsOut[u][b][a];
-            if (bH < aH)
-            {
-                LPFunction disBA = Tree[rank[a]].disIn[bH];
-                if (empty)
-                {
-                    disUATmp = scUB.LPFCatSupport(disBA, lBound, uBound, catSupRec, acc);
-                    disUAMin = disUATmp;
-                } else
-                {
-                    if (disBA.minY + scUB.minY <= disUAMin.maxY)
-                    {
-                        disUATmp = scUB.LPFCatSupport(disBA, lBound, uBound, catSupRec, acc);
-                    }
-                }
-
-            } else if (bH == aH)
-            {
-                // b == a
-                scUA = scUB;
-                if (empty)
-                {
-                    disUATmp = scUB;
-                    disUAMin = disUATmp;
-                } else if (scUB.minY <= disUAMin.maxY or scUB.vX.back() > disUAMin.vX.back())
-                {
-                    disUATmp = scUB;
-                }
-            } else
-            {
-                LPFunction disBA = Tree[rank[b]].disOut[aH];
-                if (empty)
-                {
-                    disUATmp = scUB.LPFCatSupport(disBA, lBound, uBound, catSupRec, acc);
-                    disUAMin = disUATmp;
-                } else if (disBA.minY + scUB.minY <= disUAMin.maxY)
-                {
-                    disUATmp = scUB.LPFCatSupport(disBA, lBound, uBound, catSupRec, acc);
-                }
-            }
-
-            if (disUATmp.vX.size() > 1 and !disUAMin.dominate(disUATmp, acc))
-            {
-                disUAMin = disUAMin.LPFMinSupByPlaneSweep(disUATmp, acc);
-            }
-            assert(disUAMin.ID1 == u and disUAMin.ID2 == a);
-        }
-
-        vector<int> changedPos;
-        bool updated = disUAMin.vX.size() > 1 and !disUAOld.equal(disUAMin, changedPos);
-
-        if (!updated)
-            continue;
-
-        Tree[uRank].disOut[aH] = disUAMin;
-        Tree[uRank].cntOut[aH] = 1;
-
-        bool newLabDec = !disUAOld.dominate(disUAMin, acc);
-        // secondly, check which dis can be infected
-        for (int vRank: VidtoTNid[u])
-        {
-            // sc(v,u) + lb(u,a)
-            int &cnt = Tree[vRank].cntOut[aH];
-            if (cnt == 0)
-                continue;
-            LPFunction &disVA = Tree[vRank].disOut[aH];
-            bool changed = newLabDec or lpfIsSupportBy(disVA, disUAOld, changedPos, false);
-            if (changed)
-                cnt = 0;
-        }
-
-        for (int vRank: VidtoTNid[a])
-        {
-            // lb(u,a) + sc(a,v)
-            if (Tree[vRank].height <= Tree[uRank].height or Tree[vRank].ancIDs[uH] != u)
-                continue;
-
-            int &cnt = Tree[vRank].cntIn[uH];
-            if (cnt == 0)
-                continue;
-            LPFunction &disUV = Tree[vRank].disIn[uH];
-            bool changed = newLabDec or lpfIsSupportBy(disUV, disUAOld, changedPos, false);
-            if (changed)
-                cnt = 0;
-        }
-    }
-}
-
-void Graph::H2HExtendBatDiGraph(vector<pair<int, int>> &wBatch)
-{
-//    cout << "Index maintenance for " << wBatch.size() << " extension updates" << endl;
-    unordered_map < pair<int, int>, LPFunction, boost::hash<pair<int, int>> > OCdisOld;
-
-    // NodeOrderss.clear();
-    NodeOrderss.assign(NodeOrder.begin(), NodeOrder.end());
-    vector<set<int>> SCreIn, SCreOut; //SCre.clear();
-    set<int> ss; //ss.clear();
-    SCreIn.assign(nodeNum, ss), SCreOut.assign(nodeNum, ss); //{vertexID, set<int>}
-    set < OrderCompp > OC;
-    OC.clear();//vertexID in decreasing Node order
-
-    int debugID1 = 1, debugID2 = 1;
-    for (const auto &k: wBatch)
-    {
-        int a = k.first;
-        int b = k.second;
-        if (a == debugID1 and b == debugID2)
-            cout << 1;
-
-        if (NodeOrder[a] < NodeOrder[b])
-        {
-            for (auto &j: Tree[rank[a]].vertOut)
-            {
-                if (j.first == b and j.second.first.vSupportContains(a))
-                {
+//void Graph::H2HExtendBatDiGraph(vector<pair<int, int>> &wBatch)
+//{
+////    cout << "Index maintenance for " << wBatch.size() << " extension updates" << endl;
+//    unordered_map<pair<int, int>, LPFunction, boost::hash<pair<int, int>>> OCdisOld;
+//
+//    // NodeOrderss.clear();
+//    NodeOrderss.assign(NodeOrder.begin(), NodeOrder.end());
+//    vector<set<int>> SCreIn, SCreOut; //SCre.clear();
+//    set<int> ss; //ss.clear();
+//    SCreIn.assign(nodeNum, ss), SCreOut.assign(nodeNum, ss); //{vertexID, set<int>}
+//    set<OrderCompp> OC;
+//    OC.clear();//vertexID in decreasing Node order
+//
+//    int debugID1 = 1, debugID2 = 1;
+//    for (const auto &k: wBatch)
+//    {
+//        int a = k.first;
+//        int b = k.first;
+//        if (a == debugID1 and b == debugID2)
+//            cout << 1;
+//
+//        if (NodeOrder[a] < NodeOrder[b])
+//        {
+//            for (auto &j: Tree[rank[a]].vertOut)
+//            {
+//                if (j.first == b and j.second.first.vSupportContains(a))
+//                {
 //                    j.second.first.extendFunction(lBound, uBound);
-                    OCdisOld[{a, b}] = j.second.first;
-                    SCreOut[a].insert(b);
-                    OC.insert(OrderCompp(a));
-                    break;
-                }
-            }
-        } else
-        {
-            for (auto &j: Tree[rank[b]].vertIn)
-            {
-                if (j.first == a and j.second.first.vSupportContains(b))
-                {
+//                    OCdisOld[{a, b}] = j.second.first;
+//                    SCreOut[a].insert(b);
+//                    OC.insert(OrderCompp(a));
+//                    break;
+//                }
+//            }
+//        } else
+//        {
+//            for (auto &j: Tree[rank[b]].vertIn)
+//            {
+//                if (j.first == a and j.second.first.vSupportContains(b))
+//                {
 //                    j.second.first.extendFunction(lBound, uBound);
-                    OCdisOld[{a, b}] = j.second.first;
-                    SCreIn[b].insert(a);
-                    OC.insert(OrderCompp(b));
-                    break;
-                }
-            }
-        }
-    }
-//    cout << "** finish sc refresh" << endl;
-
-    vector<int> ProBeginVertexSet;
-    vector<int> ProBeginVertexSetNew;
-    int ProID;
-    bool influence;
-
-    Timer clock;
-    clock.tick();
-    while (!OC.empty())
-    {
-        ProID = (*OC.begin()).x;
-        if (ProID == -1)
-            cout << 1;
-
-        OC.erase(OC.begin());
-        influence = false;
-
-//        cout << "ProID: " << ProID << " " << Tree[rank[ProID]].disIn.size() << endl;
-        for (const auto &Cid: SCreIn[ProID])
-        {
-            if (Cid == debugID1 and ProID == debugID2)
-                cout << 1;
-            int CidH = Tree[rank[Cid]].height - 1;
-            /* check if sc(cid,pid) is really influenced, if so, update it with the new function */
-            LPFunction scCPNew(Cid, ProID, lBound, uBound);
-            for (const auto &i: adjEdge[Cid])
-            {
-                if (i.first == ProID)
-                {
-                    scCPNew = vEdge[i.second].lpf;
-                    break;
-                }
-            }
-            LPFunction scCPOld = OCdisOld[{Cid, ProID}];
-
-            for (auto &vs: SCconNodesMT[Cid][ProID])
-            {
-                LPFunction CidToVS, vsToProId;
-                for (auto &i: Tree[rank[vs]].vertIn)
-                {
-                    if (i.first == Cid)
-                    {
+//                    OCdisOld[{a, b}] = j.second.first;
+//                    SCreIn[b].insert(a);
+//                    OC.insert(OrderCompp(b));
+//                    break;
+//                }
+//            }
+//        }
+//    }
+////    cout << "** finish sc refresh" << endl;
+//
+//    vector<int> ProBeginVertexSet;
+//    vector<int> ProBeginVertexSetNew;
+//    int ProID;
+//    bool influence;
+//
+//    Timer clock;
+//    clock.tick();
+//    while (!OC.empty())
+//    {
+//        ProID = (*OC.begin()).x;
+//        if (ProID == -1)
+//            cout << 1;
+//
+//        OC.erase(OC.begin());
+//        influence = false;
+//
+////        cout << "ProID: " << ProID << " " << Tree[rank[ProID]].disIn.size() << endl;
+//        for (const auto &Cid: SCreIn[ProID])
+//        {
+//            if (Cid == debugID1 and ProID == debugID2)
+//                cout << 1;
+//            int CidH = Tree[rank[Cid]].height - 1;
+//            /* check if sc(cid,pid) is really influenced, if so, update it with the new function */
+//            LPFunction scCPNew;
+//            for (const auto &i: adjEdge[Cid])
+//            {
+//                if (i.first == ProID)
+//                {
+//                    scCPNew = vEdge[i.second].lpf;
+//                    break;
+//                }
+//            }
+//            LPFunction scCPOld = OCdisOld[{Cid, ProID}];
+//            LPFunction scCPOldExist = scCPOld;
+//            scCPOldExist.dummyLastItv(itvLen);
+//            if (scCPNew.vX.size() > 1)
+//                scCPOldExist = scCPOldExist.LPFMinSupByPlaneSweep(scCPNew);
+//
+//            for (auto &vs: SCconNodesMT[Cid][ProID])
+//            {
+//                LPFunction CidToVS, vsToProId;
+//                for (auto &i: Tree[rank[vs]].vertIn)
+//                {
+//                    if (i.first == Cid)
+//                    {
 //                        if (i.second.first.upperBound < uBound)
 //                            i.second.first.extendFunction(lBound, uBound);
-                        CidToVS = i.second.first;
-                        break;
-                    }
-                }
-                for (auto &i: Tree[rank[vs]].vertOut)
-                {
-                    if (i.first == ProID)
-                    {
+//                        CidToVS = i.second.first;
+//                        break;
+//                    }
+//                }
+//                for (auto &i: Tree[rank[vs]].vertOut)
+//                {
+//                    if (i.first == ProID)
+//                    {
 //                        if (i.second.first.upperBound < uBound)
 //                            i.second.first.extendFunction(lBound, uBound);
-                        vsToProId = i.second.first;
-                        break;
-                    }
-                }
-
-                LPFunction CPTmp;
-                CatSupRec &catSupRec = intermediateSCs[Cid][vs][ProID];
-                if (CidToVS.minY + vsToProId.minY <= scCPNew.maxY or scCPNew.vX.size() < 2)
-                {
-                    CPTmp = CidToVS.LPFCatSupportExtend(vsToProId, itvLen, catSupRec, acc);
-                }
-
-                if (CPTmp.vX.size() > 1 and !scCPNew.dominate(CPTmp, acc))
-                {
-                    scCPNew = scCPNew.LPFMinSupByPlaneSweep(CPTmp, acc);
-                }
-            }
-            assert(scCPNew.vX.size() > 1);
-
-            vector<int> changedPos;
-            if (scCPOld.equal(scCPNew, changedPos))
-                continue;
-
-            for (auto &j: Tree[rank[ProID]].vertIn)
-            {
-                if (j.first == Cid)
-                {
-                    assert(scCPNew.ID1 == Cid and scCPNew.ID2 == ProID);
-                    j.second = {scCPNew, 1};
-                    break;
-                }
-            }
-
-            // HneiOut: <accessories contract after Cid, lpf from ProId to hid
-            unordered_set<int> HneiOut;
-            // LneiOut: accessories contract after ProId and before Cid, lpf from ProId to lid
-            vector<int> LneiOut;
-            for (auto &j: Tree[rank[ProID]].vertOut)
-            {
-                // j.first is the accessory of ProID
-                if (NodeOrder[j.first] > NodeOrder[Cid])
-                    HneiOut.insert(j.first);
-                else if (NodeOrder[j.first] < NodeOrder[Cid])
-                    LneiOut.emplace_back(j.first);
-            }
-
-            // in theory, scCPOld should dominate scCPNew, but due to rounding, domination may not hold
-            bool newSCDec = !scCPOld.dominate(scCPNew, acc); // assert(newSCDec == false);
-
-            for (auto &i: Tree[rank[Cid]].vertOut)
-            {
-                int hid = i.first;
-                if (HneiOut.find(hid) != HneiOut.end())
-                {
-                    bool changed =
-                            newSCDec or i.second.second <= 0 or
-                            lpfIsSupportBy(i.second.first, scCPOld, changedPos, true);
-                    if (i.second.second > 0 and changed)
-                    {
+//                        vsToProId = i.second.first;
+//                        break;
+//                    }
+//                }
+//
+//                LPFunction CPTmp;
+//                CatSupRec &catSupRec = intermediateSCs[Cid][vs][ProID];
+//                if (CidToVS.minY + vsToProId.minY <= scCPOldExist.maxY)
+//                {
+//                    CPTmp = CidToVS.LPFCatSupport(vsToProId, lBound, uBound, catSupRec);
+////                    catSupRec.extendEnd(uBound + itvLen, itvLen);
+//                }
+//
+//                if (CPTmp.vX.size() > 1 and !scCPOldExist.dominate(CPTmp))
+//                {
+//                    scCPOldExist = scCPOldExist.LPFMinSupByPlaneSweep(CPTmp);
+//                }
+//            }
+//            assert(scCPOldExist.maxY < INF);
+//            scCPNew = scCPOldExist;
+//
+//            vector<int> changedPos;
+//            if (scCPOld.equal(scCPNew, changedPos))
+//                continue;
+//
+//            for (auto &j: Tree[rank[ProID]].vertIn)
+//            {
+//                if (j.first == Cid)
+//                {
+//                    assert(scCPNew.ID1 == Cid and scCPNew.ID2 == ProID);
+//                    j.second = {scCPNew, 1};
+//                    break;
+//                }
+//            }
+//
+//            // HneiOut: <accessories contract after Cid, lpf from ProId to hid
+//            unordered_set<int> HneiOut;
+//            // LneiOut: accessories contract after ProId and before Cid, lpf from ProId to lid
+//            vector<int> LneiOut;
+//            for (auto &j: Tree[rank[ProID]].vertOut)
+//            {
+//                // j.first is the accessory of ProID
+//                if (NodeOrder[j.first] > NodeOrder[Cid])
+//                    HneiOut.insert(j.first);
+//                else if (NodeOrder[j.first] < NodeOrder[Cid])
+//                    LneiOut.emplace_back(j.first);
+//            }
+//
+//            // in theory, scCPOld should dominate scCPNew, but due to rounding, domination may not hold
+//            bool newSCDec = !scCPOld.dominate(scCPNew); // assert(newSCDec == false);
+//
+//            for (auto &i: Tree[rank[Cid]].vertOut)
+//            {
+//                int hid = i.first;
+//                if (HneiOut.find(hid) != HneiOut.end())
+//                {
+//                    bool changed =
+//                            newSCDec or i.second.second <= 0 or
+//                            lpfIsSupportBy(i.second.first, scCPOld, changedPos, true);
+//                    if (i.second.second > 0 and changed)
+//                    {
 //                        if (i.second.first.upperBound < uBound)
 //                            i.second.first.extendFunction(lBound, uBound);
-                        OCdisOld[{Cid, hid}] = i.second.first;
-                        SCreOut[Cid].insert(hid);
-                        OC.insert(OrderCompp(Cid));
-                        i.second.second = 0;
-                    }
-                }
-            }
-
-            for (auto &i: LneiOut)
-            {
-                int lid = i;
-                for (auto &j: Tree[rank[lid]].vertIn)
-                {
-                    if (j.first == Cid)
-                    {
-                        bool changed =
-                                newSCDec or j.second.second <= 0 or
-                                lpfIsSupportBy(j.second.first, scCPOld, changedPos, true);
-                        if (j.second.second > 0 and changed)
-                        {
+//                        OCdisOld[{Cid, hid}] = i.second.first;
+//                        SCreOut[Cid].insert(hid);
+//                        OC.insert(OrderCompp(Cid));
+//                        i.second.second = 0;
+//                    }
+//                }
+//            }
+//
+//            for (auto &i: LneiOut)
+//            {
+//                int lid = i;
+//                for (auto &j: Tree[rank[lid]].vertIn)
+//                {
+//                    if (j.first == Cid)
+//                    {
+//                        bool changed =
+//                                newSCDec or j.second.second <= 0 or
+//                                lpfIsSupportBy(j.second.first, scCPOld, changedPos, true);
+//                        if (j.second.second > 0 and changed)
+//                        {
 //                            if (j.second.first.upperBound < uBound)
 //                                j.second.first.extendFunction(lBound, uBound);
-                            OCdisOld[{Cid, lid}] = j.second.first;
-                            SCreIn[lid].insert(Cid);
-                            OC.insert(OrderCompp(lid));
-                            j.second.second = 0;
-                        }
-                        break;
-                    }
-                }
-            }
-
-            int pAncs = (int) Tree[rank[ProID]].ancIDs.size();
-            for (int i = 0; i < pAncs; i++)
-            {
-                // i -> cid -> pid
-                LPFunction &disIP = Tree[rank[ProID]].disIn[i];
-                if (newSCDec)
-                {
-                    if (i == CidH)
-                        influence = true;
-                    Tree[rank[ProID]].cntIn[i] = 0;
-                } else if (lpfIsSupportBy(disIP, scCPOld, changedPos, false))
-                {
-                    Tree[rank[ProID]].cntIn[i] = 0;
-                    if (i == CidH)
-                        influence = true;
-                }
-            }
-
-//            scCPNew.scSupToLbSup(ProID);
-            CatSupRec catSupRec;
-            catSupRec.vX1 = scCPNew.vX;
-            catSupRec.vX2 = scCPNew.vX;
-            catSupRec.vY = scCPNew.vY;
-//            catSupRec.extendEnd(uBound + itvLen, itvLen);
-            intermediateLBsIn[ProID][ProID][Cid] = catSupRec;
-        }
-
-        for (const auto &Cid: SCreOut[ProID])
-        {
-            if (Cid == debugID2 and ProID == debugID1)
-                cout << 1;
-            int CidH = Tree[rank[Cid]].height - 1;
-
-            /* check if sc(pid,cid) is really influenced, if so, update it with the new function */
-            LPFunction scPCNew(ProID, Cid, lBound, uBound);
-            for (const auto &i: adjEdge[ProID])
-            {
-                if (i.first == Cid)
-                {
-                    scPCNew = vEdge[i.second].lpf;
-                    break;
-                }
-            }
-
-            LPFunction scPCOld = OCdisOld[{ProID, Cid}];
-
-            for (auto &vs: SCconNodesMT[ProID][Cid])
-            {
-                LPFunction ProidToVS, vsToCid;
-                for (auto &i: Tree[rank[vs]].vertIn)
-                {
-                    if (i.first == ProID)
-                    {
+//                            OCdisOld[{Cid, lid}] = j.second.first;
+//                            SCreIn[lid].insert(Cid);
+//                            OC.insert(OrderCompp(lid));
+//                            j.second.second = 0;
+//                        }
+//                        break;
+//                    }
+//                }
+//            }
+//
+//            int pAncs = (int) Tree[rank[ProID]].ancIDs.size();
+//            for (int i = 0; i < pAncs; i++)
+//            {
+//                // i -> cid -> pid
+//                LPFunction &disIP = Tree[rank[ProID]].disIn[i];
+//                if (newSCDec)
+//                {
+//                    if (i == CidH)
+//                        influence = true;
+//                    Tree[rank[ProID]].cntIn[i] = 0;
+//                } else if (lpfIsSupportBy(disIP, scCPOld, changedPos, false))
+//                {
+//                    Tree[rank[ProID]].cntIn[i] = 0;
+//                    if (i == CidH)
+//                        influence = true;
+//                }
+//            }
+//
+////            scCPNew.scSupToLbSup(ProID);
+//            CatSupRec catSupRec;
+//            catSupRec.vX1 = scCPNew.vX;
+//            catSupRec.vX2 = scCPNew.vX;
+//            catSupRec.vY = scCPNew.vY;
+////            catSupRec.extendEnd(uBound + itvLen, itvLen);
+//            intermediateLBsIn[ProID][ProID][Cid] = catSupRec;
+//        }
+//
+//        for (const auto &Cid: SCreOut[ProID])
+//        {
+//            if (Cid == debugID2 and ProID == debugID1)
+//                cout << 1;
+//            int CidH = Tree[rank[Cid]].height - 1;
+//
+//            /* check if sc(pid,cid) is really influenced, if so, update it with the new function */
+//            LPFunction scPCNew;
+//            for (const auto &i: adjEdge[ProID])
+//            {
+//                if (i.first == Cid)
+//                {
+//                    scPCNew = vEdge[i.second].lpf;
+//                    break;
+//                }
+//            }
+//
+//            LPFunction scPCOld = OCdisOld[{ProID, Cid}];
+//            LPFunction scPCOldExist = scPCOld;
+//            scPCOldExist.dummyLastItv(itvLen);
+//            if (scPCNew.vX.size() > 1)
+//                scPCOldExist = scPCOldExist.LPFMinSupByPlaneSweep(scPCNew);
+//
+//            for (auto &vs: SCconNodesMT[ProID][Cid])
+//            {
+//                LPFunction ProidToVS, vsToCid;
+//                for (auto &i: Tree[rank[vs]].vertIn)
+//                {
+//                    if (i.first == ProID)
+//                    {
 //                        if (i.second.first.upperBound < uBound)
 //                            i.second.first.extendFunction(lBound, uBound);
-                        ProidToVS = i.second.first;
-                        break;
-                    }
-                }
-
-                for (auto &i: Tree[rank[vs]].vertOut)
-                {
-                    if (i.first == Cid)
-                    {
+//                        ProidToVS = i.second.first;
+//                        break;
+//                    }
+//                }
+//
+//                for (auto &i: Tree[rank[vs]].vertOut)
+//                {
+//                    if (i.first == Cid)
+//                    {
 //                        if (i.second.first.upperBound < uBound)
 //                            i.second.first.extendFunction(lBound, uBound);
-                        vsToCid = i.second.first;
-                        break;
-                    }
-                }
-
-                assert(ProidToVS.ID1 == ProID and vsToCid.ID2 == Cid);
-                LPFunction PCTmp;
-                if (ProidToVS.minY + vsToCid.minY <= scPCNew.maxY or scPCNew.vX.size() < 2)
-                {
-                    CatSupRec &catSupRec = intermediateSCs[ProID][vs][Cid];
-                    PCTmp = ProidToVS.LPFCatSupportExtend(vsToCid, itvLen, catSupRec, acc);
-//                    catSupRec.extendEnd(uBound + itvLen, itvLen);
-                }
-
-                if (PCTmp.vX.size() > 1 and !scPCNew.dominate(PCTmp, acc))
-                {
-                    scPCNew = scPCNew.LPFMinSupByPlaneSweep(PCTmp, acc);
-                }
-            }
-            assert(scPCNew.vX.size() > 1);
-
-            vector<int> changedPos;
-            if (scPCOld.equal(scPCNew, changedPos))
-                continue;
-            for (auto &j: Tree[rank[ProID]].vertOut)
-            {
-                if (j.first == Cid)
-                {
-                    assert(scPCNew.ID1 == ProID and scPCNew.ID2 == Cid);
-                    j.second = {scPCNew, 1};
-                    break;
-                }
-            }
-
-            unordered_set<int> HneiIn;
-            vector<int> LneiIn;
-            for (auto &i: Tree[rank[ProID]].vertIn)
-            {
-                // j.first is the accessory of ProID
-                if (NodeOrder[i.first] > NodeOrder[Cid])
-                    HneiIn.insert(i.first);
-                else if (NodeOrder[i.first] < NodeOrder[Cid])
-                    LneiIn.emplace_back(i.first);
-            }
-
-            // in theory, scCPOld should dominate scCPNew, but due to rounding, domination may not hold
-            bool newSCDec = !scPCOld.dominate(scPCNew, acc); // assert(newSCDec == false);
-
-            for (auto &i: Tree[rank[Cid]].vertIn)
-            {
-                int hid = i.first;
-                if (HneiIn.find(hid) != HneiIn.end())
-                {
-                    bool changed =
-                            newSCDec or i.second.second <= 0 or
-                            lpfIsSupportBy(i.second.first, scPCOld, changedPos, true);
-                    if (i.second.second > 0 and changed)
-                    {
+//                        vsToCid = i.second.first;
+//                        break;
+//                    }
+//                }
+//
+//                assert(ProidToVS.ID1 == ProID and vsToCid.ID2 == Cid);
+//                LPFunction PCTmp;
+//                if (ProidToVS.minY + vsToCid.minY <= scPCOldExist.maxY)
+//                {
+//                    CatSupRec &catSupRec = intermediateSCs[ProID][vs][Cid];
+//                    PCTmp = ProidToVS.LPFCatSupport(vsToCid, lBound, uBound, catSupRec);
+////                    catSupRec.extendEnd(uBound + itvLen, itvLen);
+//                }
+//
+//                if (PCTmp.vX.size() > 1 and !scPCOldExist.dominate(PCTmp))
+//                {
+//                    scPCOldExist = scPCOldExist.LPFMinSupByPlaneSweep(PCTmp);
+//                }
+//            }
+//            assert(scPCOldExist.maxY < INF);
+//            scPCNew = scPCOldExist;
+//
+//            vector<int> changedPos;
+//            if (scPCOld.equal(scPCNew, changedPos))
+//                continue;
+//            for (auto &j: Tree[rank[ProID]].vertOut)
+//            {
+//                if (j.first == Cid)
+//                {
+//                    assert(scPCNew.ID1 == ProID and scPCNew.ID2 == Cid);
+//                    j.second = {scPCNew, 1};
+//                    break;
+//                }
+//            }
+//
+//            unordered_set<int> HneiIn;
+//            vector<int> LneiIn;
+//            for (auto &i: Tree[rank[ProID]].vertIn)
+//            {
+//                // j.first is the accessory of ProID
+//                if (NodeOrder[i.first] > NodeOrder[Cid])
+//                    HneiIn.insert(i.first);
+//                else if (NodeOrder[i.first] < NodeOrder[Cid])
+//                    LneiIn.emplace_back(i.first);
+//            }
+//
+//            // in theory, scCPOld should dominate scCPNew, but due to rounding, domination may not hold
+//            bool newSCDec = !scPCOld.dominate(scPCNew); // assert(newSCDec == false);
+//
+//            for (auto &i: Tree[rank[Cid]].vertIn)
+//            {
+//                int hid = i.first;
+//                if (HneiIn.find(hid) != HneiIn.end())
+//                {
+//                    bool changed =
+//                            newSCDec or i.second.second <= 0 or
+//                            lpfIsSupportBy(i.second.first, scPCOld, changedPos, true);
+//                    if (i.second.second > 0 and changed)
+//                    {
 //                        if (i.second.first.upperBound < uBound)
 //                            i.second.first.extendFunction(lBound, uBound);
-                        OCdisOld[{hid, Cid}] = i.second.first;
-                        SCreIn[Cid].insert(hid);
-                        OC.insert(OrderCompp(Cid));
-                        i.second.second = 0;
-                    }
-                }
-            }
-
-            for (auto &lid: LneiIn)
-            {
-                for (auto &i: Tree[rank[lid]].vertOut)
-                {
-                    if (i.first == Cid)
-                    {
-                        bool changed =
-                                newSCDec or i.second.second <= 0 or
-                                lpfIsSupportBy(i.second.first, scPCOld, changedPos, true);
-                        if (i.second.second > 0 and changed)
-                        {
+//                        OCdisOld[{hid, Cid}] = i.second.first;
+//                        SCreIn[Cid].insert(hid);
+//                        OC.insert(OrderCompp(Cid));
+//                        i.second.second = 0;
+//                    }
+//                }
+//            }
+//
+//            for (auto &lid: LneiIn)
+//            {
+//                for (auto &i: Tree[rank[lid]].vertOut)
+//                {
+//                    if (i.first == Cid)
+//                    {
+//                        bool changed =
+//                                newSCDec or i.second.second <= 0 or
+//                                lpfIsSupportBy(i.second.first, scPCOld, changedPos, true);
+//                        if (i.second.second > 0 and changed)
+//                        {
 //                            if (i.second.first.upperBound < uBound)
 //                                i.second.first.extendFunction(lBound, uBound);
-                            OCdisOld[{lid, Cid}] = i.second.first;
-                            SCreOut[lid].insert(Cid);
-                            OC.insert(OrderCompp(lid));
-                            i.second.second = 0;
-                        }
-                        break;
-                    }
-                }
-            }
-
-            influence = true;
-            int pAncs = (int) Tree[rank[ProID]].ancIDs.size();
-            for (int i = 0; i < pAncs; i++)
-            {
-                LPFunction &disPI = Tree[rank[ProID]].disOut[i], disCI;
-                if (newSCDec)
-                {
-                    if (i == CidH)
-                        influence = true;
-                    Tree[rank[ProID]].cntOut[i] = 0;
-                } else if (lpfIsSupportBy(disPI, scPCOld, changedPos, false))
-                {
-                    Tree[rank[ProID]].cntOut[i] = 0;
-                    if (i == CidH)
-                        influence = true;
-                }
-            }
-
-//            scPCNew.scSupToLbSup(ProID);
-            CatSupRec catSupRec;
-            catSupRec.vX1 = scPCNew.vX;
-            catSupRec.vX2 = scPCNew.vX;
-            catSupRec.vY = scPCNew.vY;
-//            catSupRec.extendEnd(uBound + itvLen, itvLen);
-            intermediateLBsOut[ProID][ProID][Cid] = catSupRec;
-        }
-
-        if (influence)
-        {
-            ProBeginVertexSetNew.clear();
-            ProBeginVertexSetNew.reserve(ProBeginVertexSet.size() + 1);
-            ProBeginVertexSetNew.push_back(ProID);
-            int rnew = rank[ProID], r;
-            for (int i: ProBeginVertexSet)
-            {
-                r = rank[i];
-                if (LCAQuery(rnew, r) != rnew)
-                {
-                    ProBeginVertexSetNew.push_back(i);
-                }
-            }
-            ProBeginVertexSet = ProBeginVertexSetNew;
-        }
-    }
-    clock.tock();
-//    cout << "** finish bottom-up refresh: " << clock.duration().count() << " ms" << endl;
-
-    clock.tick();
-    EachNodeExtendMainThread(ProBeginVertexSet);
-    clock.tock();
-//    cout << "** time for top-down refresh: " << clock.duration().count() << " ms" << endl;
+//                            OCdisOld[{lid, Cid}] = i.second.first;
+//                            SCreOut[lid].insert(Cid);
+//                            OC.insert(OrderCompp(lid));
+//                            i.second.second = 0;
+//                        }
+//                        break;
+//                    }
+//                }
+//            }
+//
+//            influence = true;
+//            int pAncs = (int) Tree[rank[ProID]].ancIDs.size();
+//            for (int i = 0; i < pAncs; i++)
+//            {
+//                LPFunction &disPI = Tree[rank[ProID]].disOut[i], disCI;
+//                if (newSCDec)
+//                {
+//                    if (i == CidH)
+//                        influence = true;
+//                    Tree[rank[ProID]].cntOut[i] = 0;
+//                } else if (lpfIsSupportBy(disPI, scPCOld, changedPos, false))
+//                {
+//                    Tree[rank[ProID]].cntOut[i] = 0;
+//                    if (i == CidH)
+//                        influence = true;
+//                }
+//            }
+//
+////            scPCNew.scSupToLbSup(ProID);
+//            CatSupRec catSupRec;
+//            catSupRec.vX1 = scPCNew.vX;
+//            catSupRec.vX2 = scPCNew.vX;
+//            catSupRec.vY = scPCNew.vY;
+////            catSupRec.extendEnd(uBound + itvLen, itvLen);
+//            intermediateLBsOut[ProID][ProID][Cid] = catSupRec;
+//        }
+//
+//        if (influence)
+//        {
+//            ProBeginVertexSetNew.clear();
+//            ProBeginVertexSetNew.reserve(ProBeginVertexSet.size() + 1);
+//            ProBeginVertexSetNew.push_back(ProID);
+//            int rnew = rank[ProID], r;
+//            for (int i: ProBeginVertexSet)
+//            {
+//                r = rank[i];
+//                if (LCAQuery(rnew, r) != rnew)
+//                {
+//                    ProBeginVertexSetNew.push_back(i);
+//                }
+//            }
+//            ProBeginVertexSet = ProBeginVertexSetNew;
+//        }
+//    }
+//    clock.tock();
+////    cout << "** finish bottom-up refresh: " << clock.duration().count() << " ms" << endl;
+//
+//    clock.tick();
+//    EachNodeExtendMainThread(ProBeginVertexSet);
+//    clock.tock();
+////    cout << "** time for top-down refresh: " << clock.duration().count() << " ms" << endl;
 //    lBound += itvLen;
 //    uBound += itvLen;
-
-//    clock.tick();
-//    extendIndex();
-//    clock.tock();
-//    cout << "    Extending time: " << clock.duration().count() << " ms" << endl;
-}
-
-void Graph::EachNodeExtendMainThread(const vector<int> &sources)
-{
-    vector<int> uRanks;
-    uRanks.reserve(sources.size());
-    int avgHeight = 0;
-    for (int ProBeginVertexID: sources)
-    {
-//        cout << rank[ProBeginVertexID] << " ";
-        uRanks.push_back(rank[ProBeginVertexID]);
-        avgHeight += Tree[rank[ProBeginVertexID]].height;
-    }
-    cout << "    sources size: " << sources.size() << " avg height: " << avgHeight / sources.size() << endl;
-
-    int thisThreadNum = threadNum;
-    Timer clock;
-    clock.tick();
-    bool cond = false;
-    while (!uRanks.empty() and (uRanks.size() > thisThreadNum * 2 or uRanks.size() < thisThreadNum * 0.1))
-    {
-//        vector<pair<int, int>> vpairs;
-//        vpairs.reserve(uRanks.size());
-//        int step = uRanks.size()/thisThreadNum;
-//        for (int i = 0; i < thisThreadNum - 1; i++)
-//        {
-//            vpairs.push_back({i * step, (i + 1) * step});
-//        }
-//        vpairs.push_back({(thisThreadNum - 1) * step, uRanks.size()});
 //
+////    clock.tick();
+////    extendIndex();
+////    clock.tock();
+////    cout << "** finish extending index: " << clock.duration().count() << " ms" << endl;
+//}
+//
+//void Graph::EachNodeExtendMainThread(const vector<int> &sources)
+//{
+//    vector<int> uRanks;
+//    uRanks.reserve(sources.size());
+//    for (int ProBeginVertexID: sources)
+//    {
+//        uRanks.push_back(rank[ProBeginVertexID]);
+//    }
+//
+//    Timer clock;
+//    clock.tick();
+//    while (!uRanks.empty() and uRanks.size() < 100)
+//    {
 //        boost::thread_group threads;
-//        for (const auto &p:vpairs)
+//        for (const auto &u: uRanks)
 //        {
-//            threads.create_thread(
-//                    boost::bind(&Graph::EachNodeExtendMainRange,
-//                                this, p.first, p.second, boost::ref(uRanks)));
+//            threads.create_thread(boost::bind(&Graph::EachNodeExtendMain, this, u));
 //        }
 //        threads.join_all();
-
-
-        boost::thread_group threads;
-        for (const auto &p: uRanks)
-        {
-            threads.create_thread(
-                    boost::bind(&Graph::EachNodeExtendMain, this, p));
-        }
-        threads.join_all();
-
-        vector<int> newURanks;
-        for (const auto &ur: uRanks)
-        {
-            for (int j: Tree[ur].vChildren)
-            {
-                newURanks.push_back(j);
-            }
-        }
-        uRanks = newURanks;
-    }
-    clock.tock();
-
-    if (uRanks.empty())
-        return;
-    boost::thread_group threads;
-    for (const auto &urank: uRanks)
-    {
-        threads.create_thread(boost::bind(&Graph::EachNodeExtendMainRec, this, urank));
-    }
-    threads.join_all();
-}
-
-void Graph::EachNodeExtendMainRange(int begin, int end, const vector<int> &uRank)
-{
-    for (int i = begin; i < end; i++)
-    {
-        EachNodeExtendMain(uRank[i]);
-    }
-}
-
-void Graph::EachNodeExtendMainRec(int uRank)
-{
-    EachNodeExtendMain(uRank);
-    for (int j: Tree[uRank].vChildren)
-        EachNodeExtendMainRec(j);
-}
-
-void Graph::EachNodeExtendMain(int uRank)
-{
-    int u = Tree[uRank].uniqueVertex;
-    int uH = Tree[uRank].height - 1;
-
-    vector<int> line = Tree[uRank].ancIDs;
-
-    for (int aH = 0; aH < line.size(); aH++)
-    {
-        int a = line[aH];
+//
+//        vector<int> newURanks;
+//        for (const auto &ur: uRanks)
+//        {
+//            for (int j: Tree[ur].vChildren)
+//            {
+//                newURanks.push_back(j);
+//            }
+//        }
+//        uRanks = newURanks;
+//    }
+//    clock.tock();
+//
+//    clock.tick();
+//    boost::thread_group threads;
+//    for (const auto &ur: uRanks)
+//    {
+//        threads.create_thread(boost::bind(&Graph::EachNodeExtendMainRec, this, ur));
+//    }
+//    threads.join_all();
+//    clock.tock();
+//}
+//
+//void Graph::EachNodeExtendMainRec(int uRank)
+//{
+//    EachNodeExtendMain(uRank);
+//    for (int j: Tree[uRank].vChildren)
+//        EachNodeExtendMainRec(j);
+//}
+//
+//void Graph::EachNodeExtendMain(int uRank)
+//{
+//    int u = Tree[uRank].uniqueVertex;
+//    int uH = Tree[uRank].height - 1;
+//
+//    vector<int> line = Tree[uRank].ancIDs;
+//
+//    for (int aH = 0; aH < line.size(); aH++)
+//    {
+//        int a = line[aH];
 //        if (Tree[uRank].disIn[aH].upperBound < uBound)
 //            Tree[uRank].disIn[aH].extendFunction(lBound, uBound);
-        LPFunction disAUOld = Tree[uRank].disIn[aH];
-
-        if (Tree[uRank].cntIn[aH] > 0) continue;
-        //firstly, calculate the actual distance
-        int b, bH;
-        LPFunction disAUMin(a, u, lBound, uBound), scBU;
-        for (int j = 0; j < Tree[uRank].vertIn.size(); j++)
-        {
-            // a -> b -> u
-            b = Tree[uRank].vertIn[j].first;
+//        LPFunction disAUOld = Tree[uRank].disIn[aH];
+//
+//        if (Tree[uRank].cntIn[aH] > 0) continue;
+//        //firstly, calculate the actual distance
+//        int b, bH;
+//        LPFunction disAUMin = disAUOld, scBU;
+//        disAUMin.dummyLastItv(itvLen);
+//        for (int j = 0; j < Tree[uRank].vertIn.size(); j++)
+//        {
+//            // a -> b -> u
+//            b = Tree[uRank].vertIn[j].first;
 //            if (Tree[uRank].vertIn[j].second.first.upperBound < uBound)
 //                Tree[uRank].vertIn[j].second.first.extendFunction(lBound, uBound);
-            scBU = Tree[uRank].vertIn[j].second.first;
-            scBU.scSupToLbSup(u);
-            bH = Tree[rank[b]].height - 1;
-            LPFunction disAUTmp;
-            CatSupRec &catSupRec = intermediateLBsIn[u][b][a];
-            if (bH < aH)
-            {
-                LPFunction &disAB = Tree[rank[a]].disOut[bH];
-                if (disAB.minY + scBU.minY <= disAUMin.maxY)
-                {
+//            scBU = Tree[uRank].vertIn[j].second.first;
+//            scBU.scSupToLbSup(u);
+//            bH = Tree[rank[b]].height - 1;
+//            LPFunction disAUTmp;
+//            CatSupRec &catSupRec = intermediateLBsIn[u][b][a];
+//            if (bH < aH)
+//            {
+//                LPFunction &disAB = Tree[rank[a]].disOut[bH];
+//                if (disAB.minY + scBU.minY <= disAUMin.maxY)
+//                {
 //                    if (disAB.upperBound < uBound)
 //                        disAB.extendFunction(lBound, uBound);
-                    disAUTmp = disAB.LPFCatSupportExtend(scBU, itvLen, catSupRec, acc);
-                }
-            } else if (bH == aH)
-            {
-                // b == a
-                if (scBU.minY <= disAUMin.maxY)
-                    disAUTmp = scBU;
-            } else
-            {
-                LPFunction disAB = Tree[rank[b]].disIn[aH];
-                if (disAB.minY + scBU.minY <= disAUMin.maxY or disAUMin.vX.size() < 2)
-                {
+//                    disAUTmp = disAB.LPFCatSupport(scBU, lBound, uBound, catSupRec);
+//                }
+//            } else if (bH == aH)
+//            {
+//                // b == a
+//                if (scBU.minY <= disAUMin.maxY)
+//                    disAUTmp = scBU;
+//            } else
+//            {
+//                LPFunction disAB = Tree[rank[b]].disIn[aH];
+//                if (disAB.minY + scBU.minY <= disAUMin.maxY)
+//                {
 //                    if (disAB.upperBound < uBound)
 //                        disAB.extendFunction(lBound, uBound);
-                    disAUTmp = disAB.LPFCatSupportExtend(scBU, itvLen, catSupRec, acc);
-//                    catSupRec.extendEnd(uBound + itvLen, itvLen);
-                }
-            }
-
-            if (disAUTmp.vX.size() > 1 and u == 1 and a == 1)
-            {
-                cout << "~~~~~~~~~~~~~~~~~~~" << endl;
-                disAUMin.display();
-                disAUTmp.display();
-            }
-            if (!disAUMin.dominate(disAUTmp, acc))
-            {
-                disAUMin = disAUMin.LPFMinSupByPlaneSweep(disAUTmp, acc);
-            }
-            assert(disAUMin.ID1 == a and disAUMin.ID2 == u);
-        }
-
-        vector<int> changedPos;
-        bool updated = disAUMin.vX.size() > 1 and !disAUOld.equal(disAUMin, changedPos);
-        if (!updated)
-            continue;
-
-        Tree[uRank].disIn[aH] = disAUMin;
-        Tree[uRank].cntIn[aH] = 1;
-
-        bool newLabDec = !disAUOld.dominate(disAUMin, acc);
-        // firstly, check which dis can be infected
-        for (int vRank: VidtoTNid[u])
-        {
-            // lb(a, u) + sc(u, v)
-            int &cnt = Tree[vRank].cntIn[aH];
-            if (cnt == 0)
-                continue;
-            LPFunction &disAV = Tree[vRank].disIn[aH];
-            bool changed = newLabDec or lpfIsSupportBy(disAV, disAUOld, changedPos, false);
-            if (changed)
-                cnt = 0;
-        }
-
-        for (int vRank: VidtoTNid[a])
-        {
-            // sc(v, a) + lb(a, u)
-            if (Tree[vRank].height <= Tree[uRank].height or Tree[vRank].ancIDs[uH] != u)
-                continue;
-            int &cnt = Tree[vRank].cntOut[uH];
-            if (cnt == 0)
-                continue;
-            LPFunction &disVU = Tree[vRank].disOut[uH];
-            bool changed = newLabDec or lpfIsSupportBy(disVU, disAUOld, changedPos, false);
-            if (changed)
-                cnt = 0;
-        }
-    }
-
-    for (int aH = 0; aH < line.size(); aH++)
-    {
-        int a = line[aH];
+//                    disAUTmp = disAB.LPFCatSupport(scBU, lBound, uBound, catSupRec);
+////                    catSupRec.extendEnd(uBound + itvLen, itvLen);
+//                }
+//            }
+//
+//            if (disAUTmp.vX.size() > 1 and u == 1 and a == 1)
+//            {
+//                cout << "~~~~~~~~~~~~~~~~~~~" << endl;
+//                disAUMin.display();
+//                disAUTmp.display();
+//            }
+//            if (disAUTmp.vX.size() > 1 and !disAUMin.dominate(disAUTmp))
+//            {
+//                disAUMin = disAUMin.LPFMinSupByPlaneSweep(disAUTmp);
+//            }
+//            assert(disAUMin.ID1 == a and disAUMin.ID2 == u);
+//        }
+//
+//        vector<int> changedPos;
+//        bool updated = disAUMin.vX.size() > 1 and !disAUOld.equal(disAUMin, changedPos);
+//        if (!updated)
+//            continue;
+//
+//        Tree[uRank].disIn[aH] = disAUMin;
+//        Tree[uRank].cntIn[aH] = 1;
+//
+//        bool newLabDec = !disAUOld.dominate(disAUMin);
+//        // firstly, check which dis can be infected
+//        for (int vRank: VidtoTNid[u])
+//        {
+//            // lb(a, u) + sc(u, v)
+//            int &cnt = Tree[vRank].cntIn[aH];
+//            if (cnt == 0)
+//                continue;
+//            LPFunction &disAV = Tree[vRank].disIn[aH];
+//            bool changed = newLabDec or lpfIsSupportBy(disAV, disAUOld, changedPos, false);
+//            if (changed)
+//                cnt = 0;
+//        }
+//
+//        for (int vRank: VidtoTNid[a])
+//        {
+//            // sc(v, a) + lb(a, u)
+//            if (Tree[vRank].height <= Tree[uRank].height or Tree[vRank].ancIDs[uH] != u)
+//                continue;
+//            int &cnt = Tree[vRank].cntOut[uH];
+//            if (cnt == 0)
+//                continue;
+//            LPFunction &disVU = Tree[vRank].disOut[uH];
+//            bool changed = newLabDec or lpfIsSupportBy(disVU, disAUOld, changedPos, false);
+//            if (changed)
+//                cnt = 0;
+//        }
+//    }
+//
+//    for (int aH = 0; aH < line.size(); aH++)
+//    {
+//        int a = line[aH];
 //        if (Tree[uRank].disOut[aH].upperBound < uBound)
 //            Tree[uRank].disOut[aH].extendFunction(lBound, uBound);
-        LPFunction disUAOld = Tree[uRank].disOut[aH];
-
-        if (Tree[uRank].cntOut[aH] > 0) continue;
-        //firstly, calculate the actual distance
-        int b, bH;
-
-        LPFunction disUAMin(u, a, lBound, uBound), scUB;
-        for (int j = 0; j < Tree[uRank].vertOut.size(); j++)
-        {
-            // a <- b <- u
-            b = Tree[uRank].vertOut[j].first;
+//        LPFunction disUAOld = Tree[uRank].disOut[aH];
+//
+//        if (Tree[uRank].cntOut[aH] > 0) continue;
+//        //firstly, calculate the actual distance
+//        int b, bH;
+//
+//        LPFunction disUAMin = disUAOld, scUB;
+//        disUAMin.dummyLastItv(itvLen);
+//        for (int j = 0; j < Tree[uRank].vertOut.size(); j++)
+//        {
+//            // a <- b <- u
+//            b = Tree[uRank].vertOut[j].first;
 //            if (Tree[uRank].vertOut[j].second.first.upperBound < uBound)
 //                Tree[uRank].vertOut[j].second.first.extendFunction(lBound, uBound);
-            scUB = Tree[uRank].vertOut[j].second.first;
-            scUB.scSupToLbSup(u);
-            bH = Tree[rank[b]].height - 1;
-            bool empty = disUAMin.vX.size() < 2;
-            LPFunction disUATmp;
-            CatSupRec &catSupRec = intermediateLBsOut[u][b][a];
-            if (bH < aH)
-            {
-                LPFunction disBA = Tree[rank[a]].disIn[bH];
-                if (disBA.minY + scUB.minY <= disUAMin.maxY)
-                {
+//            scUB = Tree[uRank].vertOut[j].second.first;
+//            scUB.scSupToLbSup(u);
+//            bH = Tree[rank[b]].height - 1;
+//            bool empty = disUAMin.vX.size() < 2;
+//            LPFunction disUATmp;
+//            CatSupRec &catSupRec = intermediateLBsOut[u][b][a];
+//            if (bH < aH)
+//            {
+//                LPFunction disBA = Tree[rank[a]].disIn[bH];
+//                if (disBA.minY + scUB.minY <= disUAMin.maxY)
+//                {
 //                    if (disBA.upperBound < uBound)
 //                        disBA.extendFunction(lBound, uBound);
-                    disUATmp = scUB.LPFCatSupportExtend(disBA, itvLen, catSupRec, acc);
-//                    catSupRec.extendEnd(uBound + itvLen, itvLen);
-                }
-            } else if (bH == aH)
-            {
-                // b == a
-                if (scUB.minY <= disUAMin.maxY)
-                    disUATmp = scUB;
-            } else
-            {
-                LPFunction disBA = Tree[rank[b]].disOut[aH];
-                if (disBA.minY + scUB.minY <= disUAMin.maxY or disUAMin.vX.size() < 2)
-                {
+//                    disUATmp = scUB.LPFCatSupport(disBA, lBound, uBound, catSupRec);
+////                    catSupRec.extendEnd(uBound + itvLen, itvLen);
+//                }
+//            } else if (bH == aH)
+//            {
+//                // b == a
+//                if (scUB.minY <= disUAMin.maxY)
+//                    disUATmp = scUB;
+//            } else
+//            {
+//                LPFunction disBA = Tree[rank[b]].disOut[aH];
+//                if (disBA.minY + scUB.minY <= disUAMin.maxY)
+//                {
 //                    if (disBA.upperBound < uBound)
 //                        disBA.extendFunction(lBound, uBound);
-                    disUATmp = scUB.LPFCatSupportExtend(disBA, itvLen, catSupRec, acc);
-//                    catSupRec.extendEnd(uBound + itvLen, itvLen);
-                }
-            }
-
-            if (!disUAMin.dominate(disUATmp, acc))
-            {
-                disUAMin = disUAMin.LPFMinSupByPlaneSweep(disUATmp, acc);
-            }
-            assert(disUAMin.ID1 == u and disUAMin.ID2 == a);
-        }
-
-        vector<int> changedPos;
-        bool updated = disUAMin.vX.size() > 1 and !disUAOld.equal(disUAMin, changedPos);
-
-        if (!updated)
-            continue;
-
-        Tree[uRank].disOut[aH] = disUAMin;
-        Tree[uRank].cntOut[aH] = 1;
-
-        bool newLabDec = !disUAOld.dominate(disUAMin, acc);
-        // secondly, check which dis can be infected
-        for (int vRank: VidtoTNid[u])
-        {
-            // sc(v,u) + lb(u,a)
-            int &cnt = Tree[vRank].cntOut[aH];
-            if (cnt == 0)
-                continue;
-            LPFunction &disVA = Tree[vRank].disOut[aH];
-            bool changed = newLabDec or
-                           lpfIsSupportBy(disVA, disUAOld, changedPos, false);
-            if (changed)
-                cnt = 0;
-        }
-
-        for (int vRank: VidtoTNid[a])
-        {
-            // lb(u,a) + sc(a,v)
-            if (Tree[vRank].height <= Tree[uRank].height or Tree[vRank].ancIDs[uH] != u)
-                continue;
-
-            int &cnt = Tree[vRank].cntIn[uH];
-            if (cnt == 0)
-                continue;
-            LPFunction &disUV = Tree[vRank].disIn[uH];
-            bool changed = newLabDec or
-                           lpfIsSupportBy(disUV, disUAOld, changedPos, false);
-            if (changed)
-                cnt = 0;
-        }
-    }
-}
-
-void Graph::timeWinSwitchSimpleExtend(int win1, int win2)
-{
-    vector<pair<int, int>> vpID;
-    int thisThreadNum = threadNum;
-    int step = nodeNum / thisThreadNum;
-
-    vpID.reserve(thisThreadNum - 1);
-    for (int i = 0; i < thisThreadNum - 1; i++)
-    {
-        vpID.emplace_back(i * step, (i + 1) * step);
-    }
-    vpID.emplace_back((thisThreadNum - 1) * step, nodeNum);
-
-    boost::thread_group threads;
-    for (int i = 0; i < thisThreadNum; i++)
-    {
-        threads.add_thread(
-                new boost::thread(
-                        &Graph::timeWinSwitchSimpleExtendRange, this, vpID[i].first, vpID[i].second
-                ));
-    }
-    threads.join_all();
-}
-
-void Graph::timeWinSwitchSimpleExtendRange(int begin, int end)
-{
-    for (int i = begin; i < end; i++)
-    {
-//        for (auto &j: adjEdge[i])
-//        {
-//            vEdge[j.second].lpf.extendFunction(lBound, uBound);
-//        }
-//
-//        for (auto &p: Tree[i].vertIn)
-//        {
-//            p.second.first.extendFunction(lBound, uBound);
-//        }
-//
-//        for (auto &p: Tree[i].vertOut)
-//        {
-//            p.second.first.extendFunction(lBound, uBound);
-//        }
-
-//        int pid = Tree[i].uniqueVertex;
-
-//        for (const auto &ps: SCconNodesMT[pid])
-//        {
-//            for (const auto &j: ps.second)
-//            {
-//                intermediateSCs[pid][j][ps.first].extendEnd(uBound, itvLen);
+//                    disUATmp = scUB.LPFCatSupport(disBA, lBound, uBound, catSupRec);
+////                    catSupRec.extendEnd(uBound + itvLen, itvLen);
+//                }
 //            }
-//        }
-
-//        for (auto &j: adjEdge[pid])
-//        {
-//            intermediateSCs[pid][pid][j.first].extendEnd(uBound, itvLen);
-//        }
 //
-//        for (const auto &p: Tree[i].vertIn)
-//        {
-//            int vid = p.first;
-//            for (const auto &aid: Tree[i].ancIDs)
+//            if (disUATmp.vX.size() > 1 and !disUAMin.dominate(disUATmp))
 //            {
-//                intermediateLBsIn[pid][vid][aid].extendEnd(uBound, itvLen);
-//                intermediateLBsOut[pid][vid][aid].extendEnd(uBound, itvLen);
+//                disUAMin = disUAMin.LPFMinSupByPlaneSweep(disUATmp);
 //            }
-//            intermediateLBsIn[pid][pid][vid].extendEnd(uBound, itvLen);
-//            intermediateLBsOut[pid][pid][vid].extendEnd(uBound, itvLen);
-//        }
-
-//        for (auto &p: Tree[i].disIn)
-//        {
-//            p.extendFunction(lBound, uBound);
+//            assert(disUAMin.ID1 == u and disUAMin.ID2 == a);
 //        }
 //
-//        for (auto &p: Tree[i].disOut)
+//        vector<int> changedPos;
+//        bool updated = disUAMin.vX.size() > 1 and !disUAOld.equal(disUAMin, changedPos);
+//
+//        if (!updated)
+//            continue;
+//
+//        Tree[uRank].disOut[aH] = disUAMin;
+//        Tree[uRank].cntOut[aH] = 1;
+//
+//        bool newLabDec = !disUAOld.dominate(disUAMin);
+//        // secondly, check which dis can be infected
+//        for (int vRank: VidtoTNid[u])
 //        {
-//            p.extendFunction(lBound, uBound);
+//            // sc(v,u) + lb(u,a)
+//            int &cnt = Tree[vRank].cntOut[aH];
+//            if (cnt == 0)
+//                continue;
+//            LPFunction &disVA = Tree[vRank].disOut[aH];
+//            bool changed = newLabDec or lpfIsSupportBy(disVA, disUAOld, changedPos, false);
+//            if (changed)
+//                cnt = 0;
 //        }
-    }
-}
+//
+//        for (int vRank: VidtoTNid[a])
+//        {
+//            // lb(u,a) + sc(a,v)
+//            if (Tree[vRank].height <= Tree[uRank].height or Tree[vRank].ancIDs[uH] != u)
+//                continue;
+//
+//            int &cnt = Tree[vRank].cntIn[uH];
+//            if (cnt == 0)
+//                continue;
+//            LPFunction &disUV = Tree[vRank].disIn[uH];
+//            bool changed = newLabDec or lpfIsSupportBy(disUV, disUAOld, changedPos, false);
+//            if (changed)
+//                cnt = 0;
+//        }
+//    }
+//}
+//
+//void Graph::timeWinSwitchSimpleExtend(int win1, int win2)
+//{
+//    vector<pair<int, int>> vpID;
+//    int thisThreadNum = threadNum;
+//    int step = nodeNum / thisThreadNum;
+//
+//    vpID.reserve(thisThreadNum - 1);
+//    for (int i = 0; i < thisThreadNum - 1; i++)
+//    {
+//        vpID.emplace_back(i * step, (i + 1) * step);
+//    }
+//    vpID.emplace_back((thisThreadNum - 1) * step, nodeNum);
+//
+//    boost::thread_group threads;
+//    for (int i = 0; i < thisThreadNum; i++)
+//    {
+//        threads.add_thread(
+//                new boost::thread(
+//                        &Graph::timeWinSwitchSimpleExtendRange, this, vpID[i].first, vpID[i].second
+//                ));
+//    }
+//    threads.join_all();
+//}
+//
+//void Graph::timeWinSwitchSimpleExtendRange(int begin, int end)
+//{
+//    for (int i = begin; i < end; i++)
+//    {
+////        for (auto &j: adjEdge[i])
+////        {
+////            vEdge[j.second].lpf.extendFunction(lBound, uBound);
+////        }
+////
+////        for (auto &p: Tree[i].vertIn)
+////        {
+////            p.second.first.extendFunction(lBound, uBound);
+////        }
+////
+////        for (auto &p: Tree[i].vertOut)
+////        {
+////            p.second.first.extendFunction(lBound, uBound);
+////        }
+//
+////        int pid = Tree[i].uniqueVertex;
+//
+////        for (const auto &ps: SCconNodesMT[pid])
+////        {
+////            for (const auto &j: ps.second)
+////            {
+////                intermediateSCs[pid][j][ps.first].extendEnd(uBound, itvLen);
+////            }
+////        }
+//
+////        for (auto &j: adjEdge[pid])
+////        {
+////            intermediateSCs[pid][pid][j.first].extendEnd(uBound, itvLen);
+////        }
+////
+////        for (const auto &p: Tree[i].vertIn)
+////        {
+////            int vid = p.first;
+////            for (const auto &aid: Tree[i].ancIDs)
+////            {
+////                intermediateLBsIn[pid][vid][aid].extendEnd(uBound, itvLen);
+////                intermediateLBsOut[pid][vid][aid].extendEnd(uBound, itvLen);
+////            }
+////            intermediateLBsIn[pid][pid][vid].extendEnd(uBound, itvLen);
+////            intermediateLBsOut[pid][pid][vid].extendEnd(uBound, itvLen);
+////        }
+//
+////        for (auto &p: Tree[i].disIn)
+////        {
+////            p.extendFunction(lBound, uBound);
+////        }
+////
+////        for (auto &p: Tree[i].disOut)
+////        {
+////            p.extendFunction(lBound, uBound);
+////        }
+//    }
+//}

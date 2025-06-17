@@ -485,12 +485,13 @@ bool Tools::findFile(std::string filename)
 
 bool Tools::redundant(int x1, int y1, int x2, int y2, int x3, int y3)
 {
+    return false;
     if (x3 <= x1 || x3 <= x2)
         return true;
 
     int y = Tools::Round((y3 - (y3 - y1) * (x3 - x2) * 1.0 / (x3 - x1)));
     int dev = y > y2 ? y - y2 : y2 - y;
-    if (dev <= 10)
+    if (dev <= 1)
     {
         return true;
     } else

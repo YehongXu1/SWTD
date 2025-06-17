@@ -50,7 +50,7 @@ void Graph::detNodeOrder()
     DD.assign(nodeNum, 0);
     DD2.assign(nodeNum, 0);
 
-    set < DegComp > Deg;
+    set<DegComp> Deg;
     int degree;
     for (int i = 0; i < nodeNum; i++)
     {
@@ -624,125 +624,6 @@ LPFunction Graph::forwardSearch(int ID1, int ID2, int &miny)
 //    cout << "Finish loading graph, nodeNum: " << nodeNum << endl;
 //}
 
-void Graph::readDirectedGraph(string mapfile, string speedfile, int lowerB, int upperB, int slotNum)
-{
-    ifstream in(mapfile.c_str());
-    if (!in)
-    {
-        cout << "Cannot open file " << mapfile << endl;
-        return;
-    }
-    LPFunction lpf;
-    lBound = lowerB, uBound = upperB, deltaT = 300 * slotNum;
-    int winNum1 = lBound / deltaT, winNum2 = upperB / deltaT;
-
-    string x;
-    in >> x >> nodeNum >> edgeNum;
-
-    adjList.assign(nodeNum + 1, vector<pair<int, int> >());
-    adjListR.assign(nodeNum + 1, vector<pair<int, int> >());
-    adjEdge.assign(nodeNum + 1, vector<pair<int, int> >());
-    adjEdgeR.assign(nodeNum + 1, vector<pair<int, int> >());
-
-    Edge eTmp;
-    vEdge.assign(edgeNum, eTmp);
-
-    int ID1, ID2, roadID = 0;
-    while (in >> ID1 >> ID2)
-    {
-        adjList[ID1].push_back(make_pair(ID2, 10));
-        adjListR[ID2].push_back(make_pair(ID1, 10));
-
-        adjEdge[ID1].push_back(make_pair(ID2, roadID));
-        adjEdgeR[ID2].push_back(make_pair(ID1, roadID));
-
-        Edge e;
-        e.edgeID = roadID;
-        e.ID1 = ID1;
-        e.ID2 = ID2;
-        vEdge[e.edgeID] = e;
-        roadID += 1;
-    }
-    in.close();
-
-    detNodeOrder();
-    ifstream inSpeed(speedfile.c_str());
-    if (!inSpeed)
-    {
-        cout << "Cannot open speed file " << speedfile << endl;
-    }
-
-    string s;
-    stringstream ss;
-    map<int, int> turningPointMap;
-    for (int i = 0; i < roadID; i++)
-    {
-        int u = vEdge[i].ID1, v = vEdge[i].ID2;
-
-        int lVid = NodeOrder[u] < NodeOrder[v] ? u : v;
-//        int slotnum = itvLen / 300;
-
-        // i'm edge(u,v), edge(v, u) is not initialized yet
-        // if vEdgeInBG[i] already has
-        inSpeed >> s;
-        vector<string> vs = Tools::split(s, ",");
-        vector<int> vX, vY;
-        vX.reserve(288); // 1 day = 288 5-minutes
-        vY.assign(288, -1);
-        for (int j = 0; j < 288; j++)
-        {
-            vX.push_back(j * 300);
-            ss.clear();
-            ss.str("");
-            ss << vs[j];
-            ss >> vY[j];
-        }
-        // vX = {600 * i, i = 0, 1, 2,..., 285}
-        vEdge[i].vXFull = vX;
-        vEdge[i].vYFull = vY;
-
-        for (int j = winNum1; j <= winNum2; j++)
-        {
-            assert(j * slotNum < vEdge[i].vYFull.size());
-            vEdge[i].vX.push_back(vX[j * slotNum]);
-            vEdge[i].vY.push_back(vY[j * slotNum]);
-        }
-//            vEdge[i].vY[vEdge[i].vY.size() - 1] = vEdge[i].vY[vEdge[i].vY.size() - 2]; // virtual concatenation
-
-        vEdge[i].lpf = LPFunction(
-                u, v, lBound, uBound, vEdge[i].vX, vEdge[i].vY);
-        if (turningPointMap.find(vEdge[i].lpf.vX.size()) == turningPointMap.end())
-            turningPointMap[vEdge[i].lpf.vX.size()] = 1;
-        else
-            turningPointMap[vEdge[i].lpf.vX.size()] += 1;
-        for (int j = 0; j < vEdge[i].lpf.vX.size() - 1; j++)
-        {
-            vEdge[i].lpf.vSupportPre.push_back({{lVid, {j}}});
-        }
-    }
-    inSpeed.close();
-
-    vector<int> turningPoint, count;
-    double turnSum = 0;
-    for (auto &it: turningPointMap)
-    {
-        turningPoint.push_back(it.first);
-        count.push_back(it.second);
-        turnSum += it.first * it.second;
-    }
-
-//    for (const auto &v: turningPoint)
-//        cout << v << ", ";
-//    cout << endl;
-//    for (const auto &v: count)
-//        cout << v << ", ";
-//    cout << endl;
-    cout << "Finish loading graph, " << "|V|: " << nodeNum << ", |E|: " << edgeNum << ", Thread num: "
-         << threadNum << ", Time domain: " << lBound << " " << uBound
-         << " SlotNum: " << slotNum << ", Avg turnP num: " << 1.0 * turnSum / edgeNum << endl;
-}
-
-
 void Graph::readUndirectedGraph(string mapfile, string speedfile, string orderfile, int slotnum)
 {
     ifstream in(mapfile.c_str());
@@ -873,6 +754,361 @@ void Graph::readUndirectedGraph(string mapfile, string speedfile, string orderfi
     }
     inSpeed.close();
     cout << "Finish loading graph, nodeNum: " << nodeNum << endl;
+}
+
+void Graph::readExampleGraph(string mapfile, string speedfile, int lowerB, int upperB)
+{
+    ifstream in(mapfile.c_str());
+    if (!in)
+    {
+        cout << "Cannot open file " << mapfile << endl;
+        return;
+    }
+    LPFunction lpf;
+    lBound = lowerB, uBound = upperB;
+    int winNum1 = lBound / deltaT, winNum2 = upperB / deltaT;
+
+    string x;
+    in >> x >> nodeNum >> edgeNum;
+
+    adjList.assign(nodeNum + 1, vector<pair<int, int> >());
+    adjListR.assign(nodeNum + 1, vector<pair<int, int> >());
+    adjEdge.assign(nodeNum + 1, vector<pair<int, int> >());
+    adjEdgeR.assign(nodeNum + 1, vector<pair<int, int> >());
+
+    Edge eTmp;
+    vEdge.assign(edgeNum, eTmp);
+
+    int ID1, ID2, roadID = 0;
+    while (in >> ID1 >> ID2)
+    {
+        adjList[ID1].push_back(make_pair(ID2, 10));
+        adjListR[ID2].push_back(make_pair(ID1, 10));
+
+        adjEdge[ID1].push_back(make_pair(ID2, roadID));
+        adjEdgeR[ID2].push_back(make_pair(ID1, roadID));
+
+        Edge e;
+        e.edgeID = roadID;
+        e.ID1 = ID1;
+        e.ID2 = ID2;
+        vEdge[e.edgeID] = e;
+        roadID += 1;
+    }
+    in.close();
+
+
+    std::ifstream inSP(speedfile);
+    if (!inSP.is_open())
+    {
+        std::cerr << "Error opening file" << std::endl;
+        return;
+    }
+
+    std::string line;
+    while (std::getline(inSP, line))
+    {
+        std::istringstream iss(line);
+        std::vector<std::string> items;
+        std::string item;
+
+        while (iss >> item)
+        {
+            items.push_back(item);
+        }
+
+        if (items.size() < 2) continue; // Skip invalid lines
+
+        int roadID = std::stoi(items[0]);
+        int num = std::stoi(items[1]);
+
+        vector<int> vX, vY;
+        std::vector<std::pair<int, int>> nodes;
+        for (int i = 0; i < num; i++)
+        {
+            if (2 * i + 3 >= items.size()) break; // Prevent out-of-bounds
+            int first = std::stoi(items[2 * i + 2]);
+            int second = std::stoi(items[2 * i + 3]);
+            vX.emplace_back(first);
+            vY.emplace_back(second);
+
+            if (i > 0)
+            {
+                int prevF = vX[i - 1];
+                int prevS = vY[i - 1];
+                double slop = 1.0 * (second - prevS) / (first - prevF);
+                assert(slop >= -1.0);
+            }
+        }
+
+        vEdge[roadID].vX = vX;
+        vEdge[roadID].vY = vY;
+        vEdge[roadID].vXFull = vX;
+        vEdge[roadID].vYFull = vY;
+        vEdge[roadID].lpf = LPFunction(
+                vEdge[roadID].ID1, vEdge[roadID].ID2, lBound, uBound, vEdge[roadID].vX, vEdge[roadID].vY);
+
+    }
+    inSP.close();
+
+    // add reverse edge
+    for (int i = 0; i < edgeNum; i++)
+    {
+        int u = vEdge[i].ID1, v = vEdge[i].ID2;
+        vector<int> vX = {lBound, uBound}, vY = {10000, 10000};
+        LPFunction lpf(v, u, lBound, uBound, vX, vY);
+        Edge e;
+        e.edgeID = i + edgeNum;
+        e.ID1 = v;
+        e.ID2 = u;
+        e.vX = vX;
+        e.vY = vY;
+        e.vXFull = vX;
+        e.vYFull = vY;
+        e.lpf = lpf;
+        vEdge.push_back(e);
+        adjList[v].push_back(make_pair(u, 10));
+        adjListR[u].push_back(make_pair(v, 10));
+        adjEdge[v].push_back(make_pair(u, e.edgeID));
+        adjEdgeR[u].push_back(make_pair(v, e.edgeID));
+    }
+    edgeNum = vEdge.size();
+
+    vector<set<int>> ES(nodeNum);
+    vector<set<int>> ESR(nodeNum);
+
+    for (int i = 0; i < (int) adjEdge.size(); i++)
+    {
+        for (int j = 0; j < (int) adjEdge[i].size(); j++)
+        {
+            ES[i].insert(adjEdge[i][j].first);
+        }
+    }
+
+    for (int i = 0; i < (int) adjEdgeR.size(); i++)
+    {
+        for (int j = 0; j < (int) adjEdgeR[i].size(); j++)
+        {
+            // there is an edge (j, i) in the original graph
+            ESR[i].insert(adjEdgeR[i][j].first);
+        }
+    }
+
+    int count = 0;
+    vector<bool> exist(nodeNum, true);
+    //If Degree Changed by Contraction
+    vector<bool> change(nodeNum, false);
+    vNodeOrder = {6, 2, 0, 1, 3, 8, 5, 7, 4};
+    for (const auto &eliX: vNodeOrder)
+    {
+        count++;
+        exist[eliX] = false;
+
+        //Tmp neighbors of the contracted graph
+        vector<int> Neigh, NeighR;
+        for (auto &it: ES[eliX])
+            if (exist[it])
+                Neigh.emplace_back(it);
+
+        for (auto &it: ESR[eliX])
+            if (exist[it])
+                NeighR.emplace_back(it);
+
+        //Maintain E
+        for (auto &y: Neigh)
+        {
+//            deleteE(eliX, y);
+            int u = eliX, v = y;
+            if (ES[u].find(v) != ES[u].end())
+            {
+                ES[u].erase(ES[u].find(v));
+            }
+
+            if (ESR[v].find(u) != ESR[v].end())
+            {
+                ESR[v].erase(ESR[v].find(u));
+            }
+            change[y] = true;
+        }
+
+        for (auto &y: NeighR)
+        {
+            int u = y, v = eliX;
+            if (ES[u].find(v) != ES[u].end())
+            {
+                ES[u].erase(ES[u].find(v));
+            }
+
+            if (ESR[v].find(u) != ESR[v].end())
+            {
+                ESR[v].erase(ESR[v].find(u));
+            }
+        }
+
+        for (auto &ID1: NeighR)
+        {
+            for (auto &ID2: Neigh)
+            {
+                if (ID1 == ID2)
+                    continue;
+
+                if (ES[ID1].find(ID2) == ES[ID1].end())
+                {
+                    ES[ID1].insert(ID2);
+                }
+
+                if (ESR[ID2].find(ID1) == ESR[ID2].end())
+                {
+                    ESR[ID2].insert(ID1);
+                }
+                //Degree Changed
+                change[ID1] = true;
+                change[ID2] = true;
+            }
+        }
+    }
+
+//    assert(vNodeOrder.size() == nodeNum);
+    NodeOrder.assign(nodeNum, -1);
+    for (int k = 0; k < (int) vNodeOrder.size(); k++)
+    {
+        NodeOrder[vNodeOrder[k]] = k;
+//        cout << vNodeOrder[k] << ": " << k << endl;
+    }
+
+    for (int i = 0; i < edgeNum; i++)
+    {
+        int u = vEdge[i].ID1, v = vEdge[i].ID2;
+
+        int lVid = NodeOrder[u] < NodeOrder[v] ? u : v;
+
+        for (int j = 0; j < vEdge[i].lpf.vX.size() - 1; j++)
+        {
+            vEdge[i].lpf.vSupportPre.push_back({{lVid, {j}}});
+        }
+    }
+    cout << 1;
+}
+
+
+void Graph::readDirectedGraph(string mapfile, string speedfile, int lowerB, int upperB, int slotNum)
+{
+    ifstream in(mapfile.c_str());
+    if (!in)
+    {
+        cout << "Cannot open file " << mapfile << endl;
+        return;
+    }
+    LPFunction lpf;
+    lBound = lowerB, uBound = upperB, deltaT = 300 * slotNum;
+    int winNum1 = lBound / deltaT, winNum2 = upperB / deltaT;
+
+    string x;
+    in >> x >> nodeNum >> edgeNum;
+
+    adjList.assign(nodeNum + 1, vector<pair<int, int> >());
+    adjListR.assign(nodeNum + 1, vector<pair<int, int> >());
+    adjEdge.assign(nodeNum + 1, vector<pair<int, int> >());
+    adjEdgeR.assign(nodeNum + 1, vector<pair<int, int> >());
+
+    Edge eTmp;
+    vEdge.assign(edgeNum, eTmp);
+
+    int ID1, ID2, roadID = 0;
+    while (in >> ID1 >> ID2)
+    {
+        adjList[ID1].push_back(make_pair(ID2, 10));
+        adjListR[ID2].push_back(make_pair(ID1, 10));
+
+        adjEdge[ID1].push_back(make_pair(ID2, roadID));
+        adjEdgeR[ID2].push_back(make_pair(ID1, roadID));
+
+        Edge e;
+        e.edgeID = roadID;
+        e.ID1 = ID1;
+        e.ID2 = ID2;
+        vEdge[e.edgeID] = e;
+        roadID += 1;
+    }
+    in.close();
+
+    detNodeOrder();
+    ifstream inSpeed(speedfile.c_str());
+    if (!inSpeed)
+    {
+        cout << "Cannot open speed file " << speedfile << endl;
+    }
+
+    string s;
+    stringstream ss;
+    map<int, int> turningPointMap;
+
+    for (int i = 0; i < roadID; i++)
+    {
+        int u = vEdge[i].ID1, v = vEdge[i].ID2;
+
+        int lVid = NodeOrder[u] < NodeOrder[v] ? u : v;
+//        int slotnum = itvLen / 300;
+
+        // i'm edge(u,v), edge(v, u) is not initialized yet
+        // if vEdgeInBG[i] already has
+        inSpeed >> s;
+        vector<string> vs = Tools::split(s, ",");
+        vector<int> vX, vY;
+        vX.reserve(288); // 1 day = 288 5-minutes
+        vY.assign(288, -1);
+        for (int j = 0; j < 288; j++)
+        {
+            vX.push_back(j * 300);
+            ss.clear();
+            ss.str("");
+            ss << vs[j];
+            ss >> vY[j];
+        }
+        // vX = {600 * i, i = 0, 1, 2,..., 285}
+        vEdge[i].vXFull = vX;
+        vEdge[i].vYFull = vY;
+
+        for (int j = winNum1; j <= winNum2; j++)
+        {
+            assert(j * slotNum < vEdge[i].vYFull.size());
+            vEdge[i].vX.push_back(vX[j * slotNum]);
+            vEdge[i].vY.push_back(vY[j * slotNum]);
+        }
+//            vEdge[i].vY[vEdge[i].vY.size() - 1] = vEdge[i].vY[vEdge[i].vY.size() - 2]; // virtual concatenation
+
+        vEdge[i].lpf = LPFunction(
+                u, v, lBound, uBound, vEdge[i].vX, vEdge[i].vY);
+        if (turningPointMap.find(vEdge[i].lpf.vX.size()) == turningPointMap.end())
+            turningPointMap[vEdge[i].lpf.vX.size()] = 1;
+        else
+            turningPointMap[vEdge[i].lpf.vX.size()] += 1;
+        for (int j = 0; j < vEdge[i].lpf.vX.size() - 1; j++)
+        {
+            vEdge[i].lpf.vSupportPre.push_back({{lVid, {j}}});
+        }
+    }
+
+    inSpeed.close();
+
+    vector<int> turningPoint, count;
+    double turnSum = 0;
+    for (auto &it: turningPointMap)
+    {
+        turningPoint.push_back(it.first);
+        count.push_back(it.second);
+        turnSum += it.first * it.second;
+    }
+
+//    for (const auto &v: turningPoint)
+//        cout << v << ", ";
+//    cout << endl;
+//    for (const auto &v: count)
+//        cout << v << ", ";
+//    cout << endl;
+    cout << "Finish loading graph, " << "|V|: " << nodeNum << ", |E|: " << edgeNum << ", Thread num: "
+         << threadNum << ", Time domain: " << lBound << " " << uBound
+         << " SlotNum: " << slotNum << ", Avg turnP num: " << 1.0 * turnSum / edgeNum << endl;
 }
 
 int Graph::DijkstraPath(int ID1, int ID2, vector<int> &vPath, vector<int> &vPathEdge)
